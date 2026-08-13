@@ -1,0 +1,8 @@
+{
+  "seq_before": " (",
+  "seq_between": ", ",
+  "seq_after": ")",
+  "grid_color": "#ff0000",
+  "background_color": "#ffffff",
+  "text_color": "#000000"
+}
