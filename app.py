@@ -394,6 +394,8 @@ class GeoTables(QMainWindow):
         config_menu.addAction("Select Background Color", self.select_background_color)
         config_menu.addAction("Select Text Color", self.select_text_color)
         config_menu.addSeparator()
+        config_menu.addAction("Save Data Folder to Config", self.save_data_dir_to_config)
+        config_menu.addSeparator()
         config_menu.addAction("Export Config...", self.export_config)
         config_menu.addAction("Import Config...", self.import_config)
 
@@ -1129,6 +1131,14 @@ class GeoTables(QMainWindow):
         except Exception:
             # ignore errors and keep defaults
             pass
+    
+    def save_data_dir_to_config(self):
+        self.save_config()
+        QMessageBox.information(
+            self,
+            "Data folder saved",
+            f"Saved to config.json:\n{self._app_dir}"
+        )
 
     def save_config(self):
         try:
