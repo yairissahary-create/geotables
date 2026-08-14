@@ -1065,33 +1065,70 @@ class GeoTables(QMainWindow):
             }}
         """)
 
+    def _platform_folder_prefix(self):
+        import platform
+        system = platform.system()
+        if system == "Windows":
+            return "Geotables_windows"
+        if system == "Darwin":
+            return "Geotables_macOS"
+        return "Geotables_linux"
+
+    def _guess_data_dir(self):
+        prefix = self._platform_folder_prefix()
+        search_roots = [
+            Path(__file__).resolve().parent,
+            Path(__file__).resolve().parent.parent,
+            Path.home(),
+            Path.home() / "Downloads",
+            Path.home() / "Desktop",
+        ]
+
+        candidate_names = [prefix] + [f"{prefix} ({n})" for n in range(1, 7)]
+
+        for root in search_roots:
+            if not root.is_dir():
+                continue
+            for name in candidate_names:
+                candidate = root / name
+                if candidate.is_dir() and self._data_dir_has_required_files(candidate):
+                    return candidate
+
+        return None
+
     def _data_dir_has_required_files(self, directory):
             directory = Path(directory)
             return (directory / "config.json").exists() and (directory / "justifications.json").exists()
 
     def load_data_dir(self):
-            script_dir = Path(__file__).resolve().parent
+        script_dir = Path(__file__).resolve().parent
 
-            # Check config.json for a previously saved data folder.
-            try:
-                if self._config_path.exists():
-                    with self._config_path.open("r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    saved = data.get("data_dir")
-                    if saved and self._data_dir_has_required_files(saved):
-                        return Path(saved)
-            except Exception:
-                pass
+        # Check config.json for a previously saved data folder.
+        try:
+            if self._config_path.exists():
+                with self._config_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                saved = data.get("data_dir")
+                if saved and self._data_dir_has_required_files(saved):
+                    return Path(saved)
+        except Exception:
+            pass
 
-            # Fall back to the script's own folder if it already has what's needed.
-            if self._data_dir_has_required_files(script_dir):
-                self._app_dir = script_dir
-                self.save_config()
-                return script_dir
+        # Try well-known platform-named folders (e.g. Geotables_windows (1)).
+        guessed = self._guess_data_dir()
+        if guessed is not None:
+            self._app_dir = guessed
+            self.save_config()
+            return guessed
 
-            # Neither worked — caller will show the window first, then prompt.
-            return None
+        # Fall back to the script's own folder if it already has what's needed.
+        if self._data_dir_has_required_files(script_dir):
+            self._app_dir = script_dir
+            self.save_config()
+            return script_dir
 
+        # Nothing worked — caller will show the window first, then prompt.
+        return None
     def prompt_for_data_dir(self):
         QMessageBox.information(
             self,
