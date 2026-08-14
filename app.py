@@ -19,10 +19,7 @@ from PySide6.QtGui import (
 from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QRectF, QSizeF, QTimer, QMarginsF
 from backend import Backend, special_chars
 
-def app_dir():
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+
 
 class ReadOnlyDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
@@ -396,10 +393,24 @@ class GeoTables(QMainWindow):
         config_menu.addAction("Select Grid Color", self.select_color)
         config_menu.addAction("Select Background Color", self.select_background_color)
         config_menu.addAction("Select Text Color", self.select_text_color)
+        config_menu.addSeparator()
+        config_menu.addAction("Export Config...", self.export_config)
+        config_menu.addAction("Import Config...", self.import_config)
 
         # State
+        # State
         self.step = 1
-        self.backend = Backend()
+
+        # config file path — always lives next to the script itself
+        self._config_path = Path(__file__).resolve().parent / "config.json"
+
+        # Determine data folder: reuse saved location if valid, else fall back
+        # to the script folder for now and prompt once the window is visible.
+        resolved_dir = self.load_data_dir()
+        needs_prompt = resolved_dir is None
+        self._app_dir = resolved_dir or Path(__file__).resolve().parent
+
+        self.backend = Backend(self._app_dir)
         self.backend.textReplaced.connect(self.on_text_replaced)
 
         self._ignore_item_changed = False
@@ -422,8 +433,6 @@ class GeoTables(QMainWindow):
         self._selected_row = None
         self._document_path = None
 
-        # config file path
-        app_dir() / "config.json"
 
         # load persisted config if present (overrides defaults)
         self.load_config()
@@ -493,6 +502,8 @@ class GeoTables(QMainWindow):
         self._autosave_timer.timeout.connect(self.auto_save)
         self._autosave_timer.start(60_000)
 
+        if needs_prompt:
+            QTimer.singleShot(0, self.prompt_for_data_dir)
 
     def new_file(self):
         if not self.confirm_discard_or_save():
@@ -642,7 +653,7 @@ class GeoTables(QMainWindow):
     def auto_save(self):
         if not self._document_dirty:
             return
-        path = self._document_path or app_dir() / "autosave.geotable"
+        path = self._document_path or self._app_dir / "autosave.geotable"
         try:
             self.write_geotable(path)
         except OSError:
@@ -899,7 +910,7 @@ class GeoTables(QMainWindow):
             return
         variables = [v.strip() for v in variables_text.split(",") if v.strip()] if variables_text.strip() else []
 
-        app_dir() / "justifications.json"
+        path = self._app_dir / "justifications.json"
 
         items = []
         if path.exists():
@@ -1052,6 +1063,51 @@ class GeoTables(QMainWindow):
             }}
         """)
 
+    def _data_dir_has_required_files(self, directory):
+            directory = Path(directory)
+            return (directory / "config.json").exists() and (directory / "justifications.json").exists()
+
+    def load_data_dir(self):
+            script_dir = Path(__file__).resolve().parent
+
+            # Check config.json for a previously saved data folder.
+            try:
+                if self._config_path.exists():
+                    with self._config_path.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    saved = data.get("data_dir")
+                    if saved and self._data_dir_has_required_files(saved):
+                        return Path(saved)
+            except Exception:
+                pass
+
+            # Fall back to the script's own folder if it already has what's needed.
+            if self._data_dir_has_required_files(script_dir):
+                return script_dir
+
+            # Neither worked — caller will show the window first, then prompt.
+            return None
+
+    def prompt_for_data_dir(self):
+        QMessageBox.information(
+            self,
+            "GeoTables data folder needed",
+            "GeoTables couldn't find config.json and/or justifications.json.\n\n"
+            "Please select the folder containing the GeoTables app files."
+        )
+        chosen_dir = QFileDialog.getExistingDirectory(
+            self, "Select GeoTables data folder", str(Path(__file__).resolve().parent)
+        )
+        if not chosen_dir:
+            return
+
+        self._app_dir = Path(chosen_dir)
+        self.backend = Backend(self._app_dir)
+        self.load_config()
+        self.apply_table_styles()
+        self.save_config()
+
+
     def load_config(self):
         try:
             if not self._config_path.exists():
@@ -1075,6 +1131,7 @@ class GeoTables(QMainWindow):
     def save_config(self):
         try:
             data = {
+                "data_dir": str(self._app_dir),
                 "seq_before": self.seq_before,
                 "seq_between": self.seq_between,
                 "seq_after": self.seq_after,
@@ -1087,6 +1144,84 @@ class GeoTables(QMainWindow):
                 f.write("\n")
         except Exception:
             pass
+
+    def export_config(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Config",
+            "geotables_config.json",
+            "JSON files (*.json)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+
+        data = {
+            "data_dir": str(self._app_dir),
+            "seq_before": self.seq_before,
+            "seq_between": self.seq_between,
+            "seq_after": self.seq_after,
+            "grid_color": self.grid_color,
+            "background_color": self.background_color,
+            "text_color": self.text_color,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+        except OSError as error:
+            QMessageBox.critical(self, "Export failed", str(error))
+            return
+
+        QMessageBox.information(self, "Config exported", path)
+
+    def import_config(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Config",
+            "",
+            "JSON files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as error:
+            QMessageBox.critical(self, "Import failed", str(error))
+            return
+
+        if not isinstance(data, dict):
+            QMessageBox.critical(self, "Import failed", "Config file must contain a JSON object.")
+            return
+
+        saved_dir = data.get("data_dir")
+        if saved_dir:
+            if self._data_dir_has_required_files(saved_dir):
+                self._app_dir = Path(saved_dir)
+                self.backend = Backend(self._app_dir)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Data folder not found",
+                    f"The imported config points to:\n{saved_dir}\n\n"
+                    "That folder doesn't have config.json/justifications.json, "
+                    "so the current data folder was kept."
+                )
+
+        self.seq_before = data.get("seq_before", self.seq_before)
+        self.seq_between = data.get("seq_between", self.seq_between)
+        self.seq_after = data.get("seq_after", self.seq_after)
+        self.grid_color = data.get("grid_color", self.grid_color)
+        self.background_color = data.get("background_color", self.background_color)
+        self.text_color = data.get("text_color", self.text_color)
+
+        self.apply_table_styles()
+        self.save_config()
+
+        QMessageBox.information(self, "Config imported", "Configuration imported successfully.")
 
     def get_language_font(self, text):
         if any('\u0590' <= ch <= '\u05FF' for ch in text):
