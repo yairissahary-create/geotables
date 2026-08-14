@@ -123,24 +123,30 @@ class TemplateDropdownDelegate(QStyledItemDelegate):
         model.setData(index, editor.currentText(), Qt.EditRole)
 
     def eventFilter(self, obj, event):
-        if (
-            event.type() == QEvent.KeyPress
-            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
-        ):
-            editor = obj.property("template_editor") or obj
-            current_row = self.table.currentRow()
-            self.commitData.emit(editor)
-            self.closeEditor.emit(editor)
+            if (
+                event.type() == QEvent.KeyPress
+                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+            ):
+                editor = obj.property("template_editor") or obj
+                current_row = self.table.currentRow()
+                self.commitData.emit(editor)
+                self.closeEditor.emit(editor)
 
-            self.owner.add_row("", after_row=current_row)
-            new_row = current_row + 1
-            self.table.setCurrentCell(new_row, 2)
-            item = self.table.item(new_row, 2)
-            if item:
-                self.table.editItem(item)
-            return True
+                justification_item = self.table.item(current_row, 1)
+                if justification_item and not justification_item.text().strip():
+                    justification_item.setText("נתון")
+                    self.owner.update_item_font(justification_item)
 
-        return super().eventFilter(obj, event)
+                self.owner.add_row("", after_row=current_row)
+                new_row = current_row + 1
+                self.table.setCurrentCell(new_row, 2)
+                item = self.table.item(new_row, 2)
+                if item:
+                    self.table.editItem(item)
+                return True
+
+            return super().eventFilter(obj, event)
+
 
     def on_template_activated(self, row, template, original_text, editor):
         self.commitData.emit(editor)
@@ -231,36 +237,43 @@ class EnterKeyDelegate(QStyledItemDelegate):
         return editor
 
     def eventFilter(self, obj, event):
-        if (
-            event.type() == QEvent.KeyPress
-            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
-        ):
-            current = self.table.currentIndex()
-
             if (
-                current.isValid()
-                and current.column() != self.table.columnCount() - 1
+                event.type() == QEvent.KeyPress
+                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
             ):
-                col = current.column()
+                current = self.table.currentIndex()
 
-                self.commitData.emit(obj)
-                self.closeEditor.emit(obj)
+                if (
+                    current.isValid()
+                    and current.column() != self.table.columnCount() - 1
+                ):
+                    col = current.column()
+                    row = current.row()
 
-                self.owner.add_row("", after_row=current.row())
+                    self.commitData.emit(obj)
+                    self.closeEditor.emit(obj)
 
-                new_row = current.row() + 1
+                    justification_item = self.table.item(row, 1)
+                    if justification_item and not justification_item.text().strip():
+                        justification_item.setText("נתון")
+                        self.owner.update_item_font(justification_item)
 
-                self.table.setCurrentCell(new_row, col)
+                    self.owner.add_row("", after_row=row)
 
-                item = self.table.item(new_row, col)
+                    new_row = row + 1
 
-                if item:
-                    self.table.editItem(item)
+                    self.table.setCurrentCell(new_row, col)
 
-                return True
+                    item = self.table.item(new_row, col)
 
-        return super().eventFilter(obj, event)
+                    if item:
+                        self.table.editItem(item)
 
+                    return True
+
+            return super().eventFilter(obj, event)
+
+    
     def paint(self, painter, option, index):
         text = index.data(Qt.DisplayRole) or ""
 
