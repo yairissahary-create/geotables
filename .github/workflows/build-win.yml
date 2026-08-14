@@ -57,7 +57,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install PySide6 pypdf
           pip install pyinstaller
-          pip install pyinstaller
+
 
       - name: Build GeoTables
         run: |
