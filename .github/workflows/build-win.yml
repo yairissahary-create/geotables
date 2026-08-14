@@ -55,7 +55,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install PySide6 pypdf
+          pip install pyinstaller
           pip install pyinstaller
 
       - name: Build GeoTables
