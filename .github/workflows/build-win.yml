@@ -30,7 +30,7 @@ jobs:
 
       - name: Build GeoTables
         run: |
-          pyinstaller --onefile --windowed --icon=assets/icon.ico --add-data "assets;assets" app.py
+          pyinstaller --onefile --windowed --icon=assets/icons/icon.ico --add-data "assets;assets" app.py
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
@@ -60,7 +60,7 @@ jobs:
 
       - name: Build GeoTables
         run: |
-          pyinstaller --windowed --icon=assets/icon.icns --add-data "assets:assets" app.py
+          pyinstaller --windowed --icon=assets/icons/icon.icns --add-data "assets:assets" app.py
 
       - name: Rename app
         run: |
