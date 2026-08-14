@@ -1083,6 +1083,8 @@ class GeoTables(QMainWindow):
 
             # Fall back to the script's own folder if it already has what's needed.
             if self._data_dir_has_required_files(script_dir):
+                self._app_dir = script_dir
+                self.save_config()
                 return script_dir
 
             # Neither worked — caller will show the window first, then prompt.
