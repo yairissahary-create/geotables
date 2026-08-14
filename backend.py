@@ -6,17 +6,6 @@ special_chars=["≠", "≤", "≥","∦", "∠","∥","⟂","⟂","△","≌","�
 
 # Load justifications.json safely (tolerate missing or malformed files).
 SCRIPT_DIR = Path(__file__).resolve().parent
-data = []
-try:
-    path = SCRIPT_DIR / "justifications.json"
-    if path.exists():
-        with path.open("r", encoding="utf-8") as file:
-            data = json.load(file)
-    else:
-        data = []
-except Exception as exc:
-    print(f"Warning: could not load justifications.json: {exc}")
-    data = []
 
 
 script_end_chars = set([" ", "+", "-", "=", ")", "]", "}", ","] + special_chars)
@@ -27,16 +16,26 @@ class Backend(QObject):
     textReplaced = Signal(str)
     suggestionReady = Signal(list)
 
-    def __init__(self):
+    def __init__(self, data_dir=None):
         super().__init__()
-        # Initialize justifications data and flattened name list for suggestions.
-        self.justifications = data if isinstance(data, list) else []
+        self.data_dir = Path(data_dir) if data_dir else SCRIPT_DIR
+        self.justifications = self._load_justifications()
         names = []
         for item in self.justifications:
             for n in item.get("name", []) if isinstance(item.get("name", []), list) else []:
                 names.append(n)
         self.justification_names = names
 
+    def _load_justifications(self):
+        path = self.data_dir / "justifications.json"
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8") as file:
+                    loaded = json.load(file)
+                return loaded if isinstance(loaded, list) else []
+        except Exception as exc:
+            print(f"Warning: could not load justifications.json: {exc}")
+        return []
     @Slot(str, str, str)
     def replace_text(self, text, find, replace):
         """Replace all occurrences of find with replace in text."""
