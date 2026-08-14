@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
+
   windows:
     name: Build Windows
     runs-on: windows-latest
@@ -35,3 +36,71 @@ jobs:
         with:
           name: GeoTables-Windows
           path: dist/app.exe
+
+
+  macos:
+    name: Build macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build GeoTables
+        run: |
+          pyinstaller --windowed --icon=assets/icon.icns --add-data "assets:assets" app.py
+
+      - name: Rename app
+        run: |
+          mv "dist/app.app" "dist/GeoTables.app"
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeoTables-macOS
+          path: dist/GeoTables.app
+
+
+  linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build GeoTables
+        run: |
+          pyinstaller --onefile --windowed --add-data "assets:assets" app.py
+
+      - name: Rename executable
+        run: |
+          mv dist/app dist/GeoTables
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeoTables-Linux
+          path: dist/GeoTables
