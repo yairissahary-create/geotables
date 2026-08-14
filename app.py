@@ -19,7 +19,10 @@ from PySide6.QtGui import (
 from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QRectF, QSizeF, QTimer, QMarginsF
 from backend import Backend, special_chars
 
-
+def app_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
 
 class ReadOnlyDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
@@ -420,7 +423,7 @@ class GeoTables(QMainWindow):
         self._document_path = None
 
         # config file path
-        self._config_path = Path(__file__).resolve().parent / "config.json"
+        app_dir() / "config.json"
 
         # load persisted config if present (overrides defaults)
         self.load_config()
@@ -639,7 +642,7 @@ class GeoTables(QMainWindow):
     def auto_save(self):
         if not self._document_dirty:
             return
-        path = self._document_path or Path(__file__).resolve().parent / "autosave.geotable"
+        path = self._document_path or app_dir() / "autosave.geotable"
         try:
             self.write_geotable(path)
         except OSError:
@@ -896,7 +899,7 @@ class GeoTables(QMainWindow):
             return
         variables = [v.strip() for v in variables_text.split(",") if v.strip()] if variables_text.strip() else []
 
-        path = Path(__file__).resolve().parent / "justifications.json"
+        app_dir() / "justifications.json"
 
         items = []
         if path.exists():
