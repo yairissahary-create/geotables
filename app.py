@@ -18,6 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QRectF, QSizeF, QTimer, QMarginsF
 from backend import Backend, special_chars
+import winreg
 
 
 
@@ -395,6 +396,7 @@ class GeoTables(QMainWindow):
         config_menu.addAction("Select Text Color", self.select_text_color)
         config_menu.addSeparator()
         config_menu.addAction("Save Data Folder to Config", self.save_data_dir_to_config)
+        config_menu.addAction("Save Data Folder", self.save_data_dir_registry)
         config_menu.addSeparator()
         config_menu.addAction("Export Config...", self.export_config)
         config_menu.addAction("Import Config...", self.import_config)
@@ -1065,6 +1067,39 @@ class GeoTables(QMainWindow):
             }}
         """)
 
+
+
+
+    def save_data_dir_registry(self):
+        key_path = r"Software\GeoTables"
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.SetValueEx(
+                key,
+                "data_dir",
+                0,
+                winreg.REG_SZ,
+                str(self._app_dir)
+            )
+
+
+    def load_data_dir_registry(self):
+        key_path = r"Software\GeoTables"
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                data_dir, _ = winreg.QueryValueEx(key, "data_dir")
+
+            path = Path(data_dir)
+
+            if self._data_dir_has_required_files(path):
+                return path
+
+        except (FileNotFoundError, OSError):
+            pass
+
+        return None
+
     def _platform_folder_prefix(self):
         import platform
         system = platform.system()
@@ -1103,32 +1138,27 @@ class GeoTables(QMainWindow):
     def load_data_dir(self):
         script_dir = Path(__file__).resolve().parent
 
-        # Check config.json for a previously saved data folder.
-        try:
-            if self._config_path.exists():
-                with self._config_path.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-                saved = data.get("data_dir")
-                if saved and self._data_dir_has_required_files(saved):
-                    return Path(saved)
-        except Exception:
-            pass
+        # Check Windows Registry for previously saved data folder
+        saved = self.load_data_dir_registry()
+        if saved is not None:
+            return saved
 
-        # Try well-known platform-named folders (e.g. Geotables_windows (1)).
+        # Try well-known platform-named folders
         guessed = self._guess_data_dir()
         if guessed is not None:
             self._app_dir = guessed
-            self.save_config()
+            self.save_data_dir_registry()
             return guessed
 
-        # Fall back to the script's own folder if it already has what's needed.
+        # Fall back to the script's own folder if it already has what's needed
         if self._data_dir_has_required_files(script_dir):
             self._app_dir = script_dir
-            self.save_config()
+            self.save_data_dir_registry()
             return script_dir
 
-        # Nothing worked — caller will show the window first, then prompt.
+        # Nothing worked
         return None
+
     def prompt_for_data_dir(self):
         QMessageBox.information(
             self,
@@ -1147,6 +1177,7 @@ class GeoTables(QMainWindow):
         self.load_config()
         self.apply_table_styles()
         self.save_config()
+        self.save_data_dir_registry()
 
 
     def load_config(self):
@@ -1175,6 +1206,14 @@ class GeoTables(QMainWindow):
             self,
             "Data folder saved",
             f"Saved to config.json:\n{self._app_dir}"
+        )
+
+    def save_data_dir_to_registry(self):
+        self.save_data_dir_registry()
+        QMessageBox.information(
+            self,
+            "Data folder saved",
+            f"Saved to Windows Registry:\n{self._app_dir}"
         )
 
     def save_config(self):
