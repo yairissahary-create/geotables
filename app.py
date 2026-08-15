@@ -25,6 +25,16 @@ try:
 except ImportError:
     winreg = None
 
+# When PyInstaller freezes the app, __file__ resolves inside a temporary
+# extraction folder (especially with --onefile), not next to the actual
+# built executable. Use sys.executable's folder in that case instead, so
+# config.json / justifications.json are found and saved next to the app
+# the user actually double-clicked, not a folder that vanishes on exit.
+if getattr(sys, "frozen", False):
+    APP_BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    APP_BASE_DIR = Path(__file__).resolve().parent
+
 
 class ReadOnlyDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
@@ -407,13 +417,13 @@ class GeoTables(QMainWindow):
         self.step = 1
 
         # config file path — always lives next to the script itself
-        self._config_path = Path(__file__).resolve().parent / "config.json"
+        self._config_path = APP_BASE_DIR / "config.json"
 
         # Determine data folder: reuse saved location if valid, else fall back
         # to the script folder for now and prompt once the window is visible.
         resolved_dir = self.load_data_dir()
         needs_prompt = resolved_dir is None
-        self._app_dir = resolved_dir or Path(__file__).resolve().parent
+        self._app_dir = resolved_dir or APP_BASE_DIR
 
         self.backend = Backend(self._app_dir)
         self.backend.textReplaced.connect(self.on_text_replaced)
@@ -1141,8 +1151,8 @@ class GeoTables(QMainWindow):
     def _guess_data_dir(self):
         prefix = self._platform_folder_prefix()
         search_roots = [
-            Path(__file__).resolve().parent,
-            Path(__file__).resolve().parent.parent,
+            APP_BASE_DIR,
+            APP_BASE_DIR.parent,
             Path.home(),
             Path.home() / "Downloads",
             Path.home() / "Desktop",
@@ -1165,7 +1175,7 @@ class GeoTables(QMainWindow):
         return (directory / "config.json").exists() and (directory / "justifications.json").exists()
 
     def load_data_dir(self):
-        script_dir = Path(__file__).resolve().parent
+        script_dir = APP_BASE_DIR
 
         # Check the OS-level saved data folder (registry on Windows,
         # config-dir pointer file on macOS/Linux).
@@ -1197,7 +1207,7 @@ class GeoTables(QMainWindow):
             "Please select the folder containing the GeoTables app files."
         )
         chosen_dir = QFileDialog.getExistingDirectory(
-            self, "Select GeoTables data folder", str(Path(__file__).resolve().parent)
+            self, "Select GeoTables data folder", str(APP_BASE_DIR)
         )
         if not chosen_dir:
             return
