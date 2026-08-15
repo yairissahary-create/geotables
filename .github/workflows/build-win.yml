@@ -56,7 +56,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GeoTables-macOS
-          path: dist/GeoTables.app
+          path: |
+            dist/GeoTables.app
+            dist/*.json
   linux:
     name: Build Linux
     runs-on: ubuntu-latest
