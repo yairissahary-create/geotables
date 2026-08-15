@@ -13,13 +13,17 @@ from PySide6.QtWidgets import (
     QFileDialog
 )
 from PySide6.QtCore import QStringListModel
-from PySide6.QtGui import ( 
+from PySide6.QtGui import (
     QFont, QPainter, QTextDocument, QColor, QPdfWriter, QPageSize, QPageLayout, QIcon
 )
 from PySide6.QtCore import Qt, QEvent, QPoint, QPointF, QRectF, QSizeF, QTimer, QMarginsF
 from backend import Backend, special_chars
-import winreg
 
+# winreg only exists on Windows — guard the import so macOS/Linux don't crash.
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 
 class ReadOnlyDelegate(QStyledItemDelegate):
@@ -124,30 +128,29 @@ class TemplateDropdownDelegate(QStyledItemDelegate):
         model.setData(index, editor.currentText(), Qt.EditRole)
 
     def eventFilter(self, obj, event):
-            if (
-                event.type() == QEvent.KeyPress
-                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
-            ):
-                editor = obj.property("template_editor") or obj
-                current_row = self.table.currentRow()
-                self.commitData.emit(editor)
-                self.closeEditor.emit(editor)
+        if (
+            event.type() == QEvent.KeyPress
+            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+        ):
+            editor = obj.property("template_editor") or obj
+            current_row = self.table.currentRow()
+            self.commitData.emit(editor)
+            self.closeEditor.emit(editor)
 
-                justification_item = self.table.item(current_row, 1)
-                if justification_item and not justification_item.text().strip():
-                    justification_item.setText("נתון")
-                    self.owner.update_item_font(justification_item)
+            justification_item = self.table.item(current_row, 1)
+            if justification_item and not justification_item.text().strip():
+                justification_item.setText("נתון")
+                self.owner.update_item_font(justification_item)
 
-                self.owner.add_row("", after_row=current_row)
-                new_row = current_row + 1
-                self.table.setCurrentCell(new_row, 2)
-                item = self.table.item(new_row, 2)
-                if item:
-                    self.table.editItem(item)
-                return True
+            self.owner.add_row("", after_row=current_row)
+            new_row = current_row + 1
+            self.table.setCurrentCell(new_row, 2)
+            item = self.table.item(new_row, 2)
+            if item:
+                self.table.editItem(item)
+            return True
 
-            return super().eventFilter(obj, event)
-
+        return super().eventFilter(obj, event)
 
     def on_template_activated(self, row, template, original_text, editor):
         self.commitData.emit(editor)
@@ -238,43 +241,42 @@ class EnterKeyDelegate(QStyledItemDelegate):
         return editor
 
     def eventFilter(self, obj, event):
+        if (
+            event.type() == QEvent.KeyPress
+            and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+        ):
+            current = self.table.currentIndex()
+
             if (
-                event.type() == QEvent.KeyPress
-                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+                current.isValid()
+                and current.column() != self.table.columnCount() - 1
             ):
-                current = self.table.currentIndex()
+                col = current.column()
+                row = current.row()
 
-                if (
-                    current.isValid()
-                    and current.column() != self.table.columnCount() - 1
-                ):
-                    col = current.column()
-                    row = current.row()
+                self.commitData.emit(obj)
+                self.closeEditor.emit(obj)
 
-                    self.commitData.emit(obj)
-                    self.closeEditor.emit(obj)
+                justification_item = self.table.item(row, 1)
+                if justification_item and not justification_item.text().strip():
+                    justification_item.setText("נתון")
+                    self.owner.update_item_font(justification_item)
 
-                    justification_item = self.table.item(row, 1)
-                    if justification_item and not justification_item.text().strip():
-                        justification_item.setText("נתון")
-                        self.owner.update_item_font(justification_item)
+                self.owner.add_row("", after_row=row)
 
-                    self.owner.add_row("", after_row=row)
+                new_row = row + 1
 
-                    new_row = row + 1
+                self.table.setCurrentCell(new_row, col)
 
-                    self.table.setCurrentCell(new_row, col)
+                item = self.table.item(new_row, col)
 
-                    item = self.table.item(new_row, col)
+                if item:
+                    self.table.editItem(item)
 
-                    if item:
-                        self.table.editItem(item)
+                return True
 
-                    return True
+        return super().eventFilter(obj, event)
 
-            return super().eventFilter(obj, event)
-
-    
     def paint(self, painter, option, index):
         text = index.data(Qt.DisplayRole) or ""
 
@@ -396,12 +398,11 @@ class GeoTables(QMainWindow):
         config_menu.addAction("Select Text Color", self.select_text_color)
         config_menu.addSeparator()
         config_menu.addAction("Save Data Folder to Config", self.save_data_dir_to_config)
-        config_menu.addAction("Save Data Folder", self.save_data_dir_registry)
+        config_menu.addAction("Save Data Folder", self.save_data_dir_to_registry)
         config_menu.addSeparator()
         config_menu.addAction("Export Config...", self.export_config)
         config_menu.addAction("Import Config...", self.import_config)
 
-        # State
         # State
         self.step = 1
 
@@ -436,7 +437,6 @@ class GeoTables(QMainWindow):
         # Template workflow state
         self._selected_row = None
         self._document_path = None
-
 
         # load persisted config if present (overrides defaults)
         self.load_config()
@@ -692,7 +692,7 @@ class GeoTables(QMainWindow):
             return
         problem_number = problem_number.strip()
         if problem_number and not problem_number.endswith("."):
-            problem_number = "." + problem_number +" "
+            problem_number = "." + problem_number + " "
 
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -805,77 +805,77 @@ class GeoTables(QMainWindow):
         painter.end()
 
     def combine_pdfs(self):
-            paths, _ = QFileDialog.getOpenFileNames(
-                self,
-                "Select PDFs to combine",
-                "",
-                "PDF files (*.pdf)"
-            )
-            if not paths:
-                return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select PDFs to combine",
+            "",
+            "PDF files (*.pdf)"
+        )
+        if not paths:
+            return
 
-            numbered_files = []
-            for path in paths:
-                try:
-                    reader = PdfReader(path)
-                    first_page_text = reader.pages[0].extract_text() or ""
-                    match = re.search(r"(?m)^\s*(\d+)\.", first_page_text)
-                    if not match:
-                        raise ValueError("No problem number found above the table.")
-                    numbered_files.append((int(match.group(1)), path, reader))
-                except Exception as error:
-                    QMessageBox.critical(
-                        self,
-                        "Combine failed",
-                        f"Could not read the problem number from {Path(path).name}:\n{error}"
-                    )
-                    return
-
-            numbered_files.sort(key=lambda entry: entry[0])
-
-            lowest = numbered_files[0][0]
-            highest = numbered_files[-1][0]
-            default_name = f"{lowest}-{highest}.pdf"
-
-            output_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save combined PDF",
-                default_name,
-                "PDF files (*.pdf)"
-            )
-            if not output_path:
-                return
-            if not output_path.lower().endswith(".pdf"):
-                output_path += ".pdf"
-
-            # Flatten every page from every source, in sorted order, so a
-            # multi-page source still combines correctly.
-            all_pages = []
-            for _number, _path, reader in numbered_files:
-                all_pages.extend(reader.pages)
-
-            width = max(page.mediabox.width for page in all_pages)
-            total_height = sum(page.mediabox.height for page in all_pages)
-
-            writer = PdfWriter()
-            canvas = writer.add_blank_page(width=float(width), height=float(total_height))
-
-            # Stack pages top to bottom on one continuous page. PDF y-coordinates
-            # run bottom-up, so track a cursor starting at the top and subtract
-            # each page's height before placing it.
-            y_cursor = float(total_height)
-            for page in all_pages:
-                page_height = float(page.mediabox.height)
-                y_cursor -= page_height
-                transformation = Transformation().translate(tx=0, ty=y_cursor)
-                canvas.merge_transformed_page(page, transformation)
-
+        numbered_files = []
+        for path in paths:
             try:
-                with open(output_path, "wb") as file:
-                    writer.write(file)
-            except OSError as error:
-                QMessageBox.critical(self, "Combine failed", str(error)) 
-    
+                reader = PdfReader(path)
+                first_page_text = reader.pages[0].extract_text() or ""
+                match = re.search(r"(?m)^\s*(\d+)\.", first_page_text)
+                if not match:
+                    raise ValueError("No problem number found above the table.")
+                numbered_files.append((int(match.group(1)), path, reader))
+            except Exception as error:
+                QMessageBox.critical(
+                    self,
+                    "Combine failed",
+                    f"Could not read the problem number from {Path(path).name}:\n{error}"
+                )
+                return
+
+        numbered_files.sort(key=lambda entry: entry[0])
+
+        lowest = numbered_files[0][0]
+        highest = numbered_files[-1][0]
+        default_name = f"{lowest}-{highest}.pdf"
+
+        output_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save combined PDF",
+            default_name,
+            "PDF files (*.pdf)"
+        )
+        if not output_path:
+            return
+        if not output_path.lower().endswith(".pdf"):
+            output_path += ".pdf"
+
+        # Flatten every page from every source, in sorted order, so a
+        # multi-page source still combines correctly.
+        all_pages = []
+        for _number, _path, reader in numbered_files:
+            all_pages.extend(reader.pages)
+
+        width = max(page.mediabox.width for page in all_pages)
+        total_height = sum(page.mediabox.height for page in all_pages)
+
+        writer = PdfWriter()
+        canvas = writer.add_blank_page(width=float(width), height=float(total_height))
+
+        # Stack pages top to bottom on one continuous page. PDF y-coordinates
+        # run bottom-up, so track a cursor starting at the top and subtract
+        # each page's height before placing it.
+        y_cursor = float(total_height)
+        for page in all_pages:
+            page_height = float(page.mediabox.height)
+            y_cursor -= page_height
+            transformation = Transformation().translate(tx=0, ty=y_cursor)
+            canvas.merge_transformed_page(page, transformation)
+
+        try:
+            with open(output_path, "wb") as file:
+                writer.write(file)
+        except OSError as error:
+            QMessageBox.critical(self, "Combine failed", str(error))
+
     def undo(self):
         print("Undo")
 
@@ -884,7 +884,6 @@ class GeoTables(QMainWindow):
 
     def about(self):
         print("About GeoTables")
-    
 
     def add_json_entry(self):
         # Collect fields via simple input dialogs.
@@ -978,8 +977,6 @@ class GeoTables(QMainWindow):
         except Exception:
             pass
 
-    
-    
     def replace_special_chars(self):
         item = self.table.currentItem()
         if item is None:
@@ -1067,35 +1064,67 @@ class GeoTables(QMainWindow):
             }}
         """)
 
+    # ---- Data folder persistence (registry on Windows, config-dir file elsewhere) ----
 
-
+    def _cross_platform_pointer_path(self):
+        import platform
+        system = platform.system()
+        if system == "Darwin":
+            base = Path.home() / "Library" / "Application Support" / "GeoTables"
+        else:  # Linux and anything else non-Windows
+            base = Path.home() / ".config" / "geotables"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "data_dir.json"
 
     def save_data_dir_registry(self):
-        key_path = r"Software\GeoTables"
-
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-            winreg.SetValueEx(
-                key,
-                "data_dir",
-                0,
-                winreg.REG_SZ,
-                str(self._app_dir)
-            )
-
-
-    def load_data_dir_registry(self):
-        key_path = r"Software\GeoTables"
+        if winreg is not None:
+            key_path = r"Software\GeoTables"
+            try:
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                    winreg.SetValueEx(
+                        key,
+                        "data_dir",
+                        0,
+                        winreg.REG_SZ,
+                        str(self._app_dir)
+                    )
+            except OSError:
+                pass
+            return
 
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                data_dir, _ = winreg.QueryValueEx(key, "data_dir")
+            pointer_path = self._cross_platform_pointer_path()
+            with pointer_path.open("w", encoding="utf-8") as f:
+                json.dump({"data_dir": str(self._app_dir)}, f)
+        except OSError:
+            pass
 
-            path = Path(data_dir)
+    def load_data_dir_registry(self):
+        if winreg is not None:
+            key_path = r"Software\GeoTables"
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                    data_dir, _ = winreg.QueryValueEx(key, "data_dir")
 
-            if self._data_dir_has_required_files(path):
-                return path
+                path = Path(data_dir)
 
-        except (FileNotFoundError, OSError):
+                if self._data_dir_has_required_files(path):
+                    return path
+
+            except (FileNotFoundError, OSError):
+                pass
+
+            return None
+
+        try:
+            pointer_path = self._cross_platform_pointer_path()
+            if pointer_path.exists():
+                with pointer_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                saved = data.get("data_dir")
+                if saved and self._data_dir_has_required_files(saved):
+                    return Path(saved)
+        except (OSError, json.JSONDecodeError):
             pass
 
         return None
@@ -1132,13 +1161,14 @@ class GeoTables(QMainWindow):
         return None
 
     def _data_dir_has_required_files(self, directory):
-            directory = Path(directory)
-            return (directory / "config.json").exists() and (directory / "justifications.json").exists()
+        directory = Path(directory)
+        return (directory / "config.json").exists() and (directory / "justifications.json").exists()
 
     def load_data_dir(self):
         script_dir = Path(__file__).resolve().parent
 
-        # Check Windows Registry for previously saved data folder
+        # Check the OS-level saved data folder (registry on Windows,
+        # config-dir pointer file on macOS/Linux).
         saved = self.load_data_dir_registry()
         if saved is not None:
             return saved
@@ -1179,7 +1209,6 @@ class GeoTables(QMainWindow):
         self.save_config()
         self.save_data_dir_registry()
 
-
     def load_config(self):
         try:
             if not self._config_path.exists():
@@ -1199,7 +1228,7 @@ class GeoTables(QMainWindow):
         except Exception:
             # ignore errors and keep defaults
             pass
-    
+
     def save_data_dir_to_config(self):
         self.save_config()
         QMessageBox.information(
