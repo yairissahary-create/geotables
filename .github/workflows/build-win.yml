@@ -26,6 +26,7 @@ jobs:
       - name: Copy data files
         run: |
           copy *.json dist\
+          copy autosave.geotable dist\
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
@@ -51,14 +52,13 @@ jobs:
           pyinstaller --windowed --name GeoTables --icon=assets/icons/icon.icns --add-data "assets:assets" app.py
       - name: Copy data files
         run: |
-          cp *.json dist/
+          cp *.json dist/GeoTables.app/Contents/MacOS/
+          cp autosave.geotable dist/GeoTables.app/Contents/MacOS/
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
           name: GeoTables-macOS
-          path: |
-            dist/GeoTables.app
-            dist/*.json
+          path: dist/GeoTables.app
   linux:
     name: Build Linux
     runs-on: ubuntu-latest
@@ -80,6 +80,7 @@ jobs:
       - name: Copy data files
         run: |
           cp *.json dist/
+          cp autosave.geotable dist/
       - name: Upload Linux build
         uses: actions/upload-artifact@v4
         with:
