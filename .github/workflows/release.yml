@@ -26,49 +26,91 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --------------------------------------------------
-      # Get repository
-      # --------------------------------------------------
+
+      # ==================================================
+      # Checkout repository
+      # ==================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # --------------------------------------------------
-      # Trigger the existing Build GeoTables workflow
-      # --------------------------------------------------
+
+      # ==================================================
+      # Trigger Build GeoTables
+      # ==================================================
+
       - name: Trigger Build GeoTables
+        id: trigger_build
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        shell: bash
         run: |
+          echo "Triggering Build GeoTables..."
+
           gh workflow run "Build GeoTables" \
             --ref "${{ github.ref_name }}"
 
-      # --------------------------------------------------
-      # Wait for the build workflow to finish
-      # --------------------------------------------------
-      - name: Wait for Build GeoTables
-        id: build
+          echo "Build workflow triggered."
+
+
+      # ==================================================
+      # Find the exact workflow run we just triggered
+      # ==================================================
+
+      - name: Find triggered build
+        id: find_build
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         shell: bash
         run: |
-          echo "Waiting for Build GeoTables workflow..."
+          echo "Waiting for the new Build GeoTables run to appear..."
 
-          for i in {1..60}; do
+          run_id=""
+
+          for i in {1..30}; do
             sleep 5
 
             run_id=$(gh run list \
               --workflow="Build GeoTables" \
               --branch="${{ github.ref_name }}" \
-              --limit=1 \
-              --json databaseId,status,conclusion \
-              --jq '.[0].databaseId')
+              --event=workflow_dispatch \
+              --limit=10 \
+              --json databaseId,status,createdAt \
+              --jq 'sort_by(.createdAt) | last | .databaseId')
 
-            if [ -z "$run_id" ]; then
-              echo "Build workflow has not appeared yet."
-              continue
+            if [ -n "$run_id" ]; then
+              echo "Found build run: $run_id"
+              break
             fi
+
+            echo "Build run not visible yet..."
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "Could not find the triggered Build GeoTables run."
+            exit 1
+          fi
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+
+      # ==================================================
+      # Wait for Build GeoTables to finish
+      # ==================================================
+
+      - name: Wait for Build GeoTables
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          run_id="${{ steps.find_build.outputs.run_id }}"
+
+          echo "Waiting for Build GeoTables run $run_id..."
+
+          for i in {1..120}; do
 
             status=$(gh run view "$run_id" \
               --json status \
@@ -78,10 +120,11 @@ jobs:
               --json conclusion \
               --jq '.conclusion')
 
-            echo "Build status: $status"
-            echo "Build conclusion: $conclusion"
+            echo "Status: $status"
+            echo "Conclusion: $conclusion"
 
             if [ "$status" = "completed" ]; then
+
               if [ "$conclusion" != "success" ]; then
                 echo "Build GeoTables failed."
                 exit 1
@@ -90,21 +133,32 @@ jobs:
               echo "Build GeoTables completed successfully."
 
               echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
               break
             fi
+
+            sleep 10
+
           done
 
-          if [ -z "${run_id:-}" ]; then
+          final_status=$(gh run view "$run_id" \
+            --json status \
+            --jq '.status')
+
+          if [ "$final_status" != "completed" ]; then
             echo "Timed out waiting for Build GeoTables."
             exit 1
           fi
 
-      # --------------------------------------------------
-      # Download the ZIP produced by Build GeoTables
-      # --------------------------------------------------
-      - name: Download build artifact
+
+      # ==================================================
+      # Download the build artifact
+      # ==================================================
+
+      - name: Download GeoTables artifact
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        shell: bash
         run: |
           mkdir -p artifact
 
@@ -116,34 +170,47 @@ jobs:
           echo "Downloaded artifact:"
           find artifact -type f
 
-      # --------------------------------------------------
-      # Find the ZIP
-      # --------------------------------------------------
+
+      # ==================================================
+      # Locate ZIP
+      # ==================================================
+
       - name: Locate ZIP
         id: zip
         shell: bash
         run: |
-          zip_file=$(find artifact -type f -name "*.zip" | head -n 1)
+          zip_file=$(find artifact -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$zip_file" ]; then
-            echo "No ZIP file was found in the build artifact."
+            echo "ERROR: No ZIP file was found."
+            echo "Contents of artifact directory:"
+            find artifact -type f
             exit 1
           fi
 
-          echo "Found ZIP: $zip_file"
+          echo "Found ZIP:"
+          echo "$zip_file"
 
           echo "path=$zip_file" >> "$GITHUB_OUTPUT"
 
-      # --------------------------------------------------
+
+      # ==================================================
       # Calculate new version
-      # --------------------------------------------------
+      # ==================================================
+
       - name: Calculate new version
         id: version
         shell: bash
         run: |
+
           git fetch --tags --force
 
-          latest_tag=$(git tag --list "v*" --sort=-version:refname | head -n 1)
+          latest_tag=$(
+            git tag \
+              --list "v*" \
+              --sort=-version:refname \
+              | head -n 1
+          )
 
           if [ -z "$latest_tag" ]; then
             latest_tag="v0.0.0"
@@ -154,6 +221,7 @@ jobs:
           IFS='.' read -r major minor patch <<< "$version"
 
           case "${{ inputs.release_type }}" in
+
             patch)
               patch=$((patch + 1))
               ;;
@@ -173,64 +241,89 @@ jobs:
               echo "Invalid release type."
               exit 1
               ;;
+
           esac
 
           new_version="$major.$minor.$patch"
           new_tag="v$new_version"
 
+          echo "================================"
           echo "Previous version: $version"
           echo "Release type: ${{ inputs.release_type }}"
           echo "New version: $new_version"
+          echo "New tag: $new_tag"
+          echo "================================"
 
           echo "version=$new_version" >> "$GITHUB_OUTPUT"
           echo "tag=$new_tag" >> "$GITHUB_OUTPUT"
 
-      # --------------------------------------------------
+
+      # ==================================================
       # Rename ZIP
-      # --------------------------------------------------
+      # ==================================================
+
       - name: Rename ZIP
         shell: bash
         run: |
+
           mv \
             "${{ steps.zip.outputs.path }}" \
             "GeoTables-${{ steps.version.outputs.version }}.zip"
 
-      # --------------------------------------------------
-      # Convert \n into real newlines
-      # --------------------------------------------------
+
+      # ==================================================
+      # Create release notes
+      # ==================================================
+
       - name: Create release notes
         shell: bash
         env:
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
+
           printf '%b' "$RELEASE_NOTES" > release_notes.md
 
+          echo "================================"
           echo "Release notes:"
-          echo "----------------"
-          cat release_notes.md
-          echo "----------------"
+          echo "================================"
 
-      # --------------------------------------------------
+          cat release_notes.md
+
+          echo "================================"
+
+
+      # ==================================================
       # Create Git tag
-      # --------------------------------------------------
+      # ==================================================
+
       - name: Create Git tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
+
+          git config user.name \
+            "github-actions[bot]"
+
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
           git tag "${{ steps.version.outputs.tag }}"
-          git push origin "${{ steps.version.outputs.tag }}"
 
-      # --------------------------------------------------
+          git push origin \
+            "${{ steps.version.outputs.tag }}"
+
+
+      # ==================================================
       # Create GitHub Release
-      # --------------------------------------------------
+      # ==================================================
+
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         shell: bash
         run: |
+
           gh release create \
             "${{ steps.version.outputs.tag }}" \
             "GeoTables-${{ steps.version.outputs.version }}.zip" \
