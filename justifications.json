@@ -162,7 +162,7 @@
       "משפט חפיפה צ.צ.צ.",
       "משפט חפיפה צלע, צלע,והזווית שמול הצלע הגדולה"
     ],
-    "category": "triangles",
+    "category": "congruence",
     "templates": [
       "{A}{B}{C}≌{D}{E}{F}"
     ]
@@ -172,7 +172,7 @@
     "name": [
       "האלכסון הראשי בדלתון חוצה את זוויות הראש, חוצה את האלכסון השני ומאונך לו"
     ],
-    "category": "quadrelaterals",
+    "category": "quads",
     "templates": [
       "{A}{E}={C}{E}=1/2{A}{C}",
       "∠{A}{B}{E}=∠{E}{B}{C}=1/2∠{A}{B}{C}"
