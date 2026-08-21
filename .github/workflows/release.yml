@@ -261,21 +261,34 @@ jobs:
         run: |
           echo "Creating GitHub Release $TAG..."
 
-          mapfile -t ZIP_FILES < <(
-            find release_files \
-              -type f \
-              -iname "*.zip"
-          )
+          WINDOWS_ZIP=$(find release_files -type f -name "GeoTables-Windows.zip" | head -n 1)
+          LINUX_ZIP=$(find release_files -type f -name "GeoTables-Linux.zip" | head -n 1)
+          MACOS_ZIP=$(find release_files -type f -name "GeoTables-macOS.zip" | head -n 1)
 
-          if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
-            echo "ERROR: No ZIP files found."
+          echo "Windows: $WINDOWS_ZIP"
+          echo "Linux:   $LINUX_ZIP"
+          echo "macOS:   $MACOS_ZIP"
+
+          if [ -z "$WINDOWS_ZIP" ]; then
+            echo "ERROR: GeoTables-Windows.zip was not found."
             exit 1
           fi
 
+          if [ -z "$LINUX_ZIP" ]; then
+            echo "ERROR: GeoTables-Linux.zip was not found."
+            exit 1
+          fi
+
+          if [ -z "$MACOS_ZIP" ]; then
+            echo "ERROR: GeoTables-macOS.zip was not found."
+            exit 1
+          fi
+
+          echo ""
           echo "Release assets:"
-          for FILE in "${ZIP_FILES[@]}"; do
-            echo "  $FILE"
-          done
+          echo "  $WINDOWS_ZIP"
+          echo "  $LINUX_ZIP"
+          echo "  $MACOS_ZIP"
 
           echo ""
           echo "Creating release..."
@@ -284,7 +297,9 @@ jobs:
             echo "Attempt $ATTEMPT/5..."
 
             if gh release create "$TAG" \
-              "${ZIP_FILES[@]}" \
+              "$WINDOWS_ZIP" \
+              "$LINUX_ZIP" \
+              "$MACOS_ZIP" \
               --title "V$NEW_VERSION" \
               --notes-file release_notes.md; then
 
@@ -301,24 +316,12 @@ jobs:
 
             if [ "$ATTEMPT" -lt 5 ]; then
               echo ""
-              echo "GitHub request failed."
+              echo "GitHub upload failed."
               echo "Waiting 15 seconds before retrying..."
               sleep 15
             fi
           done
 
           echo ""
-          echo "ERROR: Could not create GitHub Release after 5 attempts."
+          echo "ERROR: Could not create/upload GitHub Release after 5 attempts."
           exit 1
-          
-          echo "=========================================="
-          echo "        RELEASE CREATED SUCCESSFULLY"
-          echo "=========================================="
-          echo "Version: $NEW_VERSION"
-          echo "Tag:     $TAG"
-          echo ""
-          echo "Assets:"
-          for FILE in "${ZIP_FILES[@]}"; do
-            echo "  $FILE"
-          done
-          echo "=========================================="
