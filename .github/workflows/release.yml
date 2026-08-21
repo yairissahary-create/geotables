@@ -1,4 +1,4 @@
-name: Create Release
+name: Release GeoTables
 
 on:
   workflow_dispatch:
@@ -8,9 +8,9 @@ on:
         required: true
         type: choice
         options:
-          - patch
           - minor
-          - major
+          - medium
+          - large
 
       release_notes:
         description: "Release notes"
@@ -26,84 +26,88 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
-      # 1. Checkout repository
-      # ============================================================
+
+      # ------------------------------------------------------------
+      # 1. Get the repository
+      # ------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 2. Determine next version
-      # ============================================================
-      - name: Determine next version
+
+      # ------------------------------------------------------------
+      # 2. Determine the new version
+      #
+      # The version comes from the latest GitHub release.
+      #
+      # Example:
+      #   latest = V1.0.1
+      #
+      # minor  -> V1.0.2
+      # medium -> V1.1.0
+      # large  -> V2.0.0
+      # ------------------------------------------------------------
+      - name: Determine version
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+
         run: |
-          echo "Finding latest release..."
+          set -e
 
-          RELEASE_JSON=$(gh release list \
-            --limit 20 \
-            --json tagName,name,isDraft,isPrerelease,createdAt)
+          echo "Getting latest GitHub release..."
 
-          echo "Releases:"
-          echo "$RELEASE_JSON"
+          LATEST_TAG=$(gh release list \
+            --limit 1 \
+            --exclude-drafts \
+            --exclude-pre-releases \
+            --json tagName \
+            --jq '.[0].tagName')
 
-          # Find the newest release whose tag is a valid semantic version.
-          #
-          # This handles:
-          #   V1.0.1
-          #   v1.0.1
-          #   1.0.1
-          #
-          # and ignores old/broken tags such as:
-          #   fix
-          #
-          CURRENT=""
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous release found."
+            echo "Using V1.0.0 as the starting version."
 
-          while read -r TAG; do
-            CLEAN="${TAG#V}"
-            CLEAN="${CLEAN#v}"
+            MAJOR=1
+            MINOR=0
+            PATCH=0
+          else
+            echo "Latest release: $LATEST_TAG"
 
-            if [[ "$CLEAN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              CURRENT="$CLEAN"
-              break
+            # Remove the V/v prefix.
+            VERSION="${LATEST_TAG#V}"
+            VERSION="${VERSION#v}"
+
+            # Extract major/minor/patch.
+            if [[ ! "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "ERROR: Latest release tag '$LATEST_TAG' is not a valid semantic version."
+              exit 1
             fi
-          done < <(
-            echo "$RELEASE_JSON" |
-            jq -r '.[] |
-              select(.isDraft == false and .isPrerelease == false) |
-              .tagName'
-          )
 
-          # If no valid semantic-version tag exists, start at 0.0.0.
-          if [ -z "$CURRENT" ]; then
-            echo "No valid semantic-version release found."
-            CURRENT="0.0.0"
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
           fi
 
-          echo "Current version: $CURRENT"
+          case "$RELEASE_TYPE" in
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-
-          case "${{ inputs.release_type }}" in
-            patch)
+            minor)
               PATCH=$((PATCH + 1))
               ;;
 
-            minor)
+            medium)
               MINOR=$((MINOR + 1))
               PATCH=0
               ;;
 
-            major)
+            large)
               MAJOR=$((MAJOR + 1))
               MINOR=0
               PATCH=0
               ;;
 
             *)
-              echo "Unknown release type."
+              echo "ERROR: Unknown release type: $RELEASE_TYPE"
               exit 1
               ;;
           esac
@@ -111,163 +115,154 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
           TAG="V$NEW_VERSION"
 
-          echo "======================================"
-          echo "Current version: $CURRENT"
-          echo "Release type:    ${{ inputs.release_type }}"
-          echo "New version:     $NEW_VERSION"
-          echo "New tag:         $TAG"
-          echo "======================================"
+          echo "New version: $NEW_VERSION"
+          echo "New tag: $TAG"
 
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # ============================================================
-      # 3. Trigger Build GeoTables
-      # ============================================================
+
+      # ------------------------------------------------------------
+      # 3. Trigger the Build GeoTables workflow
+      # ------------------------------------------------------------
       - name: Trigger Build GeoTables
         env:
           GH_TOKEN: ${{ github.token }}
+
         run: |
+          set -e
+
           echo "Triggering Build GeoTables..."
 
           gh workflow run "Build GeoTables" \
-            --ref "${{ github.ref_name }}"
+            --ref main
 
-          echo "Build workflow triggered."
+          echo "Build workflow dispatched."
 
-      # ============================================================
-      # 4. Wait for Build GeoTables to appear
-      # ============================================================
+
+      # ------------------------------------------------------------
+      # 4. Wait for the build workflow to start
+      # ------------------------------------------------------------
       - name: Find Build GeoTables run
         id: build_run
         env:
           GH_TOKEN: ${{ github.token }}
+
         run: |
-          echo "Waiting for Build GeoTables run to appear..."
+          set -e
+
+          echo "Waiting for Build GeoTables to start..."
 
           for i in {1..30}; do
+
             RUN_ID=$(gh run list \
               --workflow="Build GeoTables" \
-              --limit 20 \
-              --json databaseId,headBranch,event,status,createdAt \
-              --jq "
-                .[]
-                | select(
-                    .headBranch == \"${{ github.ref_name }}\"
-                    and .event == \"workflow_dispatch\"
+              --branch main \
+              --limit 10 \
+              --json databaseId,status,createdAt \
+              --jq '
+                map(
+                  select(
+                    .status == "queued" or
+                    .status == "in_progress"
                   )
-                | .databaseId
-              " |
-              head -n 1)
+                )
+                | sort_by(.createdAt)
+                | reverse
+                | .[0].databaseId
+              ')
 
             if [ -n "$RUN_ID" ]; then
-              echo "Found Build GeoTables run: $RUN_ID"
+              echo "Found build run: $RUN_ID"
               echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            echo "Build run not visible yet. Attempt $i/30..."
+            echo "Build run not visible yet. Waiting..."
             sleep 5
           done
 
-          echo "ERROR: Timed out waiting for Build GeoTables."
+          echo "ERROR: Could not find the Build GeoTables run."
           exit 1
 
-      # ============================================================
-      # 5. Wait for Build GeoTables to finish
-      # ============================================================
+
+      # ------------------------------------------------------------
+      # 5. Wait for the build to finish
+      # ------------------------------------------------------------
       - name: Wait for Build GeoTables
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.build_run.outputs.run_id }}
+
         run: |
+          set -e
+
           echo "Waiting for Build GeoTables run $RUN_ID..."
 
           gh run watch "$RUN_ID" --exit-status
 
           echo "Build completed successfully."
 
-      # ============================================================
-      # 6. Download build artifacts
-      # ============================================================
+
+      # ------------------------------------------------------------
+      # 6. Download the build artifacts
+      # ------------------------------------------------------------
       - name: Download build artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.build_run.outputs.run_id }}
+
         run: |
-          echo "Downloading artifacts..."
+          set -e
 
           rm -rf release_files
           mkdir -p release_files
 
+          echo "Downloading artifacts from build run $RUN_ID..."
+
           gh run download "$RUN_ID" \
             --dir release_files
 
-          echo ""
+          echo
           echo "Downloaded files:"
           find release_files -type f -print
 
-      # ============================================================
-      # 7. Find ZIP files
-      # ============================================================
-      - name: Check release files
+
+      # ------------------------------------------------------------
+      # 7. Locate the three actual release ZIPs
+      #
+      # IMPORTANT:
+      # We deliberately do NOT upload every *.zip.
+      #
+      # This prevents files such as:
+      #
+      #   base_library.zip
+      #
+      # from being uploaded as release assets.
+      # ------------------------------------------------------------
+      - name: Find release ZIPs
+        id: zips
         run: |
-          echo "Searching for ZIP files..."
+          set -e
 
-          mapfile -t ZIP_FILES < <(
-            find release_files \
-              -type f \
-              -iname "*.zip"
-          )
+          WINDOWS_ZIP=$(find release_files \
+            -type f \
+            -name 'GeoTables-Windows.zip' \
+            -print -quit)
 
-          if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
-            echo ""
-            echo "ERROR: No ZIP files were found."
-            echo ""
-            echo "Everything downloaded:"
-            find release_files -print
-            exit 1
-          fi
+          LINUX_ZIP=$(find release_files \
+            -type f \
+            -name 'GeoTables-Linux.zip' \
+            -print -quit)
 
-          echo ""
-          echo "Found ${#ZIP_FILES[@]} ZIP file(s):"
+          MAC_ZIP=$(find release_files \
+            -type f \
+            -name 'GeoTables-macOS.zip' \
+            -print -quit)
 
-          for FILE in "${ZIP_FILES[@]}"; do
-            echo "  $FILE"
-          done
-
-      # ============================================================
-      # 8. Create release notes file
-      # ============================================================
-      - name: Create release notes
-        env:
-          RELEASE_NOTES: ${{ inputs.release_notes }}
-        run: |
-          printf '%s\n' "$RELEASE_NOTES" > release_notes.md
-
-          echo "Release notes:"
-          echo "----------------------------------------"
-          cat release_notes.md
-          echo "----------------------------------------"
-
-      # ============================================================
-      # 9. Create GitHub Release
-      # ============================================================
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          NEW_VERSION: ${{ steps.version.outputs.new_version }}
-        run: |
-          echo "Creating GitHub Release $TAG..."
-
-          WINDOWS_ZIP=$(find release_files -type f -name "GeoTables-Windows.zip" | head -n 1)
-          LINUX_ZIP=$(find release_files -type f -name "GeoTables-Linux.zip" | head -n 1)
-          MACOS_ZIP=$(find release_files -type f -name "GeoTables-macOS.zip" | head -n 1)
-
-          echo "Windows: $WINDOWS_ZIP"
-          echo "Linux:   $LINUX_ZIP"
-          echo "macOS:   $MACOS_ZIP"
+          echo "Windows ZIP: $WINDOWS_ZIP"
+          echo "Linux ZIP:   $LINUX_ZIP"
+          echo "macOS ZIP:   $MAC_ZIP"
 
           if [ -z "$WINDOWS_ZIP" ]; then
             echo "ERROR: GeoTables-Windows.zip was not found."
@@ -279,49 +274,104 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$MACOS_ZIP" ]; then
+          if [ -z "$MAC_ZIP" ]; then
             echo "ERROR: GeoTables-macOS.zip was not found."
             exit 1
           fi
 
-          echo ""
-          echo "Release assets:"
-          echo "  $WINDOWS_ZIP"
-          echo "  $LINUX_ZIP"
-          echo "  $MACOS_ZIP"
+          echo "windows=$WINDOWS_ZIP" >> "$GITHUB_OUTPUT"
+          echo "linux=$LINUX_ZIP" >> "$GITHUB_OUTPUT"
+          echo "macos=$MAC_ZIP" >> "$GITHUB_OUTPUT"
 
-          echo ""
-          echo "Creating release..."
 
-          for ATTEMPT in {1..5}; do
-            echo "Attempt $ATTEMPT/5..."
+      # ------------------------------------------------------------
+      # 8. Create/update the GitHub release
+      # ------------------------------------------------------------
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-            if gh release create "$TAG" \
-              "$WINDOWS_ZIP" \
-              "$LINUX_ZIP" \
-              "$MACOS_ZIP" \
-              --title "V$NEW_VERSION" \
-              --notes-file release_notes.md; then
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.new_version }}
 
-              echo ""
-              echo "=========================================="
-              echo "        RELEASE CREATED SUCCESSFULLY"
-              echo "=========================================="
-              echo "Version: $NEW_VERSION"
-              echo "Tag:     $TAG"
-              echo "=========================================="
+          RELEASE_NOTES: ${{ inputs.release_notes }}
 
-              exit 0
-            fi
+          WINDOWS_ZIP: ${{ steps.zips.outputs.windows }}
+          LINUX_ZIP: ${{ steps.zips.outputs.linux }}
+          MAC_ZIP: ${{ steps.zips.outputs.macos }}
 
-            if [ "$ATTEMPT" -lt 5 ]; then
-              echo ""
-              echo "GitHub upload failed."
-              echo "Waiting 15 seconds before retrying..."
-              sleep 15
-            fi
-          done
+        run: |
+          set -e
 
-          echo ""
-          echo "ERROR: Could not create/upload GitHub Release after 5 attempts."
-          exit 1
+          echo "Creating/updating GitHub Release $TAG..."
+
+          # --------------------------------------------------------
+          # Write release notes to a file.
+          #
+          # This preserves newlines in the workflow input.
+          # --------------------------------------------------------
+          printf '%s\n' "$RELEASE_NOTES" > release_notes.md
+
+          echo
+          echo "Release notes:"
+          echo "--------------------"
+          cat release_notes.md
+          echo "--------------------"
+          echo
+
+          # --------------------------------------------------------
+          # Check whether this release already exists.
+          #
+          # This is important because a previous workflow attempt
+          # may have created the release before failing while
+          # uploading its assets.
+          # --------------------------------------------------------
+          if gh release view "$TAG" >/dev/null 2>&1; then
+
+            echo "Release $TAG already exists."
+            echo "Updating existing release..."
+
+            gh release edit "$TAG" \
+              --title "V$VERSION" \
+              --notes-file release_notes.md
+
+          else
+
+            echo "Release $TAG does not exist."
+            echo "Creating it..."
+
+            gh release create "$TAG" \
+              --title "V$VERSION" \
+              --notes-file release_notes.md
+
+          fi
+
+
+          # --------------------------------------------------------
+          # Upload ONLY the three real platform ZIPs.
+          #
+          # --clobber means that if an earlier failed run uploaded
+          # one of them, it will be replaced instead of failing.
+          # --------------------------------------------------------
+          echo "Uploading Windows ZIP..."
+          gh release upload "$TAG" \
+            "$WINDOWS_ZIP" \
+            --clobber
+
+          echo "Uploading Linux ZIP..."
+          gh release upload "$TAG" \
+            "$LINUX_ZIP" \
+            --clobber
+
+          echo "Uploading macOS ZIP..."
+          gh release upload "$TAG" \
+            "$MAC_ZIP" \
+            --clobber
+
+
+          echo
+          echo "========================================"
+          echo "Release completed successfully!"
+          echo "Version: V$VERSION"
+          echo "Tag:     $TAG"
+          echo "========================================"
