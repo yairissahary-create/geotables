@@ -1,8 +1,19 @@
 {
+  "data_dir": "",
   "seq_before": " (",
   "seq_between": ", ",
   "seq_after": ")",
   "grid_color": "#ff0000",
   "background_color": "#ffffff",
-  "text_color": "#000000"
+  "text_color": "#000000",
+  "find_chars": [
+    "!=", "<=", ">=", "!prl'", "ngl'", "prl'", "||", "prp'",
+    "|_", "tr'", "cng'", "~=", "=~", "sm'", "~"
+  ],
+  "replace_chars": [
+    "≠", "≤", "≥", "∦", "∠", "∥", "∥", "⟂", "⟂", "△", "≌", "≌", "≌", "∼", "∼"
+  ],
+  "special_chars": [
+    "≠", "≤", "≥", "∦", "∠", "∥", "⟂", "⟂", "△", "≌", "∼"
+  ]
 }
