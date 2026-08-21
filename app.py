@@ -148,9 +148,27 @@ class TemplateDropdownDelegate(QStyledItemDelegate):
             self.closeEditor.emit(editor)
 
             justification_item = self.table.item(current_row, 1)
-            if justification_item and not justification_item.text().strip():
+            justification_text = justification_item.text().strip() if justification_item else ""
+            if justification_item and not justification_text:
                 justification_item.setText("נתון")
                 self.owner.update_item_font(justification_item)
+                justification_text = "נתון"
+
+            # If this justification is a triangle/quadrilateral category and
+            # מצולע (col 0) is still empty, jump there and seed the matching
+            # polygon symbol instead of making a new row.
+            symbol = self.owner.backend.justification_shape_symbol(justification_text)
+            if symbol:
+                polygon_item = self.table.item(current_row, 0)
+                if polygon_item is None or not polygon_item.text().strip():
+                    if polygon_item is None:
+                        polygon_item = self.owner.create_text_item("")
+                        self.table.setItem(current_row, 0, polygon_item)
+                    polygon_item.setText(symbol)
+                    self.owner.update_item_font(polygon_item)
+                    self.table.setCurrentCell(current_row, 0)
+                    self.table.editItem(polygon_item)
+                    return True
 
             self.owner.add_row("", after_row=current_row)
             new_row = current_row + 1
@@ -272,6 +290,18 @@ class EnterKeyDelegate(QStyledItemDelegate):
                     justification_item.setText("נתון")
                     self.owner.update_item_font(justification_item)
 
+                # If we just finished editing נימוק (col 1) and טענה (col 2)
+                # is still empty in this row, jump there instead of making
+                # a new row.
+                if col == 1:
+                    statement_item = self.table.item(row, 2)
+                    if statement_item is None or not statement_item.text().strip():
+                        self.table.setCurrentCell(row, 2)
+                        target_item = self.table.item(row, 2)
+                        if target_item:
+                            self.table.editItem(target_item)
+                        return True
+
                 self.owner.add_row("", after_row=row)
 
                 new_row = row + 1
@@ -358,7 +388,7 @@ class EnterKeyDelegate(QStyledItemDelegate):
 
             elif (
                 self.specials_non_italic
-                and any(ch in special_chars for ch in current)
+                and any(ch in self.owner.backend.special_chars for ch in current)
             ):
                 style_parts.append("font-style:normal")
 
@@ -388,6 +418,7 @@ class GeoTables(QMainWindow):
         file_menu.addAction("Combine PDFs...", self.combine_pdfs)
         file_menu.addAction("Add JSON Entry", self.add_json_entry)
         file_menu.addAction("Replace special chars", self.replace_special_chars)
+        file_menu.addAction("Add character replacement...", self.add_character_replacement)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
 
@@ -907,11 +938,11 @@ class GeoTables(QMainWindow):
             return
         names = [n.strip() for n in names_text.split(";") if n.strip()] if names_text.strip() else []
 
-        category, ok = QInputDialog.getText(self, "Add JSON Entry", "category:")
-        if not ok or not category.strip():
-            QMessageBox.warning(self, "Error", "Category cannot be empty.")
+        categories_text, ok = QInputDialog.getText(self, "Add JSON Entry", "categories (semicolon (;) -separated):")
+        if not ok or not categories_text.strip():
+            QMessageBox.warning(self, "Error", "At least one category is required.")
             return
-        category = category.strip()
+        categories = [c.strip() for c in categories_text.split(";") if c.strip()]
 
         templates_text, ok = QInputDialog.getText(self, "Add JSON Entry", "templates (comma-separated):")
         if not ok:
@@ -942,7 +973,8 @@ class GeoTables(QMainWindow):
         for item in items:
             if item.get("id") == id_text:
                 item["name"] = names
-                item["category"] = category
+                item["categories"] = categories
+                item.pop("category", None)
                 item["templates"] = templates
                 item["variables"] = variables
                 action = "updated"
@@ -951,7 +983,7 @@ class GeoTables(QMainWindow):
             items.append({
                 "id": id_text,
                 "name": names,
-                "category": category,
+                "categories": categories,
                 "templates": templates,
                 "variables": variables,
             })
@@ -992,6 +1024,38 @@ class GeoTables(QMainWindow):
         if item is None:
             return
         self.backend.replace_all_special(item.text())
+
+    def add_character_replacement(self):
+        find_text, ok = QInputDialog.getText(
+            self, "Add character replacement", "Text to find (e.g. ~=):"
+        )
+        if not ok or not find_text.strip():
+            return
+        find_text = find_text.strip()
+
+        replace_text, ok = QInputDialog.getText(
+            self, "Add character replacement", "Replacement character (e.g. ≈):"
+        )
+        if not ok or not replace_text.strip():
+            return
+        replace_text = replace_text.strip()
+
+        added = self.backend.add_character_replacement(find_text, replace_text)
+        if not added:
+            QMessageBox.warning(
+                self,
+                "Not added",
+                f'"{find_text}" is already a registered replacement, '
+                "or one of the fields was empty."
+            )
+            return
+
+        self.table.viewport().update()
+        QMessageBox.information(
+            self,
+            "Character replacement added",
+            f'"{find_text}" -> "{replace_text}" added and saved to config.json.'
+        )
 
     def on_item_changed(self, item):
         if self._ignore_item_changed:
@@ -1257,15 +1321,22 @@ class GeoTables(QMainWindow):
 
     def save_config(self):
         try:
-            data = {
-                "data_dir": str(self._app_dir),
-                "seq_before": self.seq_before,
-                "seq_between": self.seq_between,
-                "seq_after": self.seq_after,
-                "grid_color": self.grid_color,
-                "background_color": self.background_color,
-                "text_color": self.text_color,
-            }
+            data = {}
+            if self._config_path.exists():
+                try:
+                    with self._config_path.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+
+            data["data_dir"] = str(self._app_dir)
+            data["seq_before"] = self.seq_before
+            data["seq_between"] = self.seq_between
+            data["seq_after"] = self.seq_after
+            data["grid_color"] = self.grid_color
+            data["background_color"] = self.background_color
+            data["text_color"] = self.text_color
+
             with self._config_path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 f.write("\n")
