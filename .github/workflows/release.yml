@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: "What type of release is this?"
+        description: "Release type"
         required: true
         type: choice
         options:
@@ -18,65 +18,75 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: write
+  actions: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
 
     steps:
-
       # ============================================================
       # 1. Checkout repository
       # ============================================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
 
       # ============================================================
-      # 2. Get version from the most recent GitHub Release
+      # 2. Determine next version
       # ============================================================
-
-      - name: Get current version
-        id: current_version
+      - name: Determine next version
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          TAG=$(gh release view --json tagName --jq '.tagName')
+          echo "Finding latest release..."
 
-          if [ -z "$TAG" ]; then
-            echo "Could not find the latest GitHub release."
-            exit 1
+          RELEASE_JSON=$(gh release list \
+            --limit 20 \
+            --json tagName,name,isDraft,isPrerelease,createdAt)
+
+          echo "Releases:"
+          echo "$RELEASE_JSON"
+
+          # Find the newest release whose tag is a valid semantic version.
+          #
+          # This handles:
+          #   V1.0.1
+          #   v1.0.1
+          #   1.0.1
+          #
+          # and ignores old/broken tags such as:
+          #   fix
+          #
+          CURRENT=""
+
+          while read -r TAG; do
+            CLEAN="${TAG#V}"
+            CLEAN="${CLEAN#v}"
+
+            if [[ "$CLEAN" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              CURRENT="$CLEAN"
+              break
+            fi
+          done < <(
+            echo "$RELEASE_JSON" |
+            jq -r '.[] |
+              select(.isDraft == false and .isPrerelease == false) |
+              .tagName'
+          )
+
+          # If no valid semantic-version tag exists, start at 0.0.0.
+          if [ -z "$CURRENT" ]; then
+            echo "No valid semantic-version release found."
+            CURRENT="0.0.0"
           fi
 
-          CURRENT_VERSION="${TAG#v}"
+          echo "Current version: $CURRENT"
 
-          echo "Latest release: $TAG"
-          echo "Current version: $CURRENT_VERSION"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
-          echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-
-
-      # ============================================================
-      # 3. Calculate the new version
-      # ============================================================
-
-      - name: Calculate new version
-        id: new_version
-        shell: bash
-        env:
-          CURRENT_VERSION: ${{ steps.current_version.outputs.version }}
-          RELEASE_TYPE: ${{ inputs.release_type }}
-        run: |
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-          case "$RELEASE_TYPE" in
-
+          case "${{ inputs.release_type }}" in
             patch)
               PATCH=$((PATCH + 1))
               ;;
@@ -93,166 +103,184 @@ jobs:
               ;;
 
             *)
-              echo "Invalid release type: $RELEASE_TYPE"
+              echo "Unknown release type."
               exit 1
               ;;
-
           esac
 
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          TAG="V$NEW_VERSION"
 
-          echo "Current version: $CURRENT_VERSION"
-          echo "Release type: $RELEASE_TYPE"
-          echo "New version: $NEW_VERSION"
+          echo "======================================"
+          echo "Current version: $CURRENT"
+          echo "Release type:    ${{ inputs.release_type }}"
+          echo "New version:     $NEW_VERSION"
+          echo "New tag:         $TAG"
+          echo "======================================"
 
-          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       # ============================================================
-      # 4. Trigger Build GeoTables
+      # 3. Trigger Build GeoTables
       # ============================================================
-
       - name: Trigger Build GeoTables
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "Triggering Build GeoTables..."
 
-          gh workflow run "Build GeoTables"
+          gh workflow run "Build GeoTables" \
+            --ref "${{ github.ref_name }}"
 
-          echo "Build GeoTables triggered."
-
+          echo "Build workflow triggered."
 
       # ============================================================
-      # 5. Wait for the newly triggered Build GeoTables run
+      # 4. Wait for Build GeoTables to appear
       # ============================================================
-
-      - name: Wait for Build GeoTables
-        id: wait_for_build
+      - name: Find Build GeoTables run
+        id: build_run
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          echo "Waiting for Build GeoTables to start..."
+          echo "Waiting for Build GeoTables run to appear..."
 
-          BUILD_RUN_ID=""
-
-          # Wait until the newly triggered workflow appears.
           for i in {1..30}; do
-
-            BUILD_RUN_ID=$(gh run list \
+            RUN_ID=$(gh run list \
               --workflow="Build GeoTables" \
-              --limit=1 \
-              --json databaseId,event,status \
-              --jq '.[] | select(.event == "workflow_dispatch") | .databaseId' \
-              | head -n 1)
+              --limit 20 \
+              --json databaseId,headBranch,event,status,createdAt \
+              --jq "
+                .[]
+                | select(
+                    .headBranch == \"${{ github.ref_name }}\"
+                    and .event == \"workflow_dispatch\"
+                  )
+                | .databaseId
+              " |
+              head -n 1)
 
-            if [ -n "$BUILD_RUN_ID" ]; then
-              echo "Found Build GeoTables run: $BUILD_RUN_ID"
-              break
+            if [ -n "$RUN_ID" ]; then
+              echo "Found Build GeoTables run: $RUN_ID"
+              echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
 
-            echo "Build has not appeared yet..."
+            echo "Build run not visible yet. Attempt $i/30..."
             sleep 5
-
           done
 
-          if [ -z "$BUILD_RUN_ID" ]; then
-            echo "Could not find the Build GeoTables run."
-            exit 1
-          fi
-
-          echo "build_run_id=$BUILD_RUN_ID" >> "$GITHUB_OUTPUT"
-
-          echo "Waiting for run $BUILD_RUN_ID to finish..."
-
-          gh run watch "$BUILD_RUN_ID" --exit-status
-
-          echo "Build GeoTables completed successfully."
-
+          echo "ERROR: Timed out waiting for Build GeoTables."
+          exit 1
 
       # ============================================================
-      # 6. Download artifacts from Build GeoTables
+      # 5. Wait for Build GeoTables to finish
       # ============================================================
-
-      - name: Download Build GeoTables artifacts
+      - name: Wait for Build GeoTables
         env:
           GH_TOKEN: ${{ github.token }}
-          BUILD_RUN_ID: ${{ steps.wait_for_build.outputs.build_run_id }}
-        shell: bash
+          RUN_ID: ${{ steps.build_run.outputs.run_id }}
         run: |
+          echo "Waiting for Build GeoTables run $RUN_ID..."
+
+          gh run watch "$RUN_ID" --exit-status
+
+          echo "Build completed successfully."
+
+      # ============================================================
+      # 6. Download build artifacts
+      # ============================================================
+      - name: Download build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.build_run.outputs.run_id }}
+        run: |
+          echo "Downloading artifacts..."
+
+          rm -rf release_files
           mkdir -p release_files
 
-          echo "Downloading artifacts from run $BUILD_RUN_ID..."
-
-          gh run download "$BUILD_RUN_ID" \
+          gh run download "$RUN_ID" \
             --dir release_files
 
           echo ""
           echo "Downloaded files:"
           find release_files -type f -print
 
-
       # ============================================================
-      # 7. Check that ZIP files were produced
+      # 7. Find ZIP files
       # ============================================================
-
       - name: Check release files
-        shell: bash
         run: |
-          ZIP_COUNT=$(find release_files -type f -name "*.zip" | wc -l)
+          echo "Searching for ZIP files..."
 
-          echo "Found $ZIP_COUNT ZIP file(s)."
+          mapfile -t ZIP_FILES < <(
+            find release_files \
+              -type f \
+              -iname "*.zip"
+          )
 
-          if [ "$ZIP_COUNT" -eq 0 ]; then
-            echo "No ZIP files were produced by Build GeoTables."
+          if [ "${#ZIP_FILES[@]}" -eq 0 ]; then
+            echo ""
+            echo "ERROR: No ZIP files were found."
+            echo ""
+            echo "Everything downloaded:"
+            find release_files -print
             exit 1
           fi
 
-          find release_files -type f -name "*.zip" -print
+          echo ""
+          echo "Found ${#ZIP_FILES[@]} ZIP file(s):"
 
+          for FILE in "${ZIP_FILES[@]}"; do
+            echo "  $FILE"
+          done
 
       # ============================================================
-      # 8. Create the Git tag
+      # 8. Create release notes file
       # ============================================================
-
-      - name: Create Git tag
+      - name: Create release notes
         env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_VERSION: ${{ steps.new_version.outputs.version }}
-        shell: bash
+          RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
-          TAG="v$NEW_VERSION"
+          printf '%s\n' "$RELEASE_NOTES" > release_notes.md
 
-          echo "Creating tag $TAG..."
-
-          git tag "$TAG"
-          git push origin "$TAG"
-
-          echo "Tag created."
-
+          echo "Release notes:"
+          echo "----------------------------------------"
+          cat release_notes.md
+          echo "----------------------------------------"
 
       # ============================================================
-      # 9. Create the GitHub Release
+      # 9. Create GitHub Release
       # ============================================================
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          NEW_VERSION: ${{ steps.new_version.outputs.version }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
-        shell: bash
+          TAG: ${{ steps.version.outputs.tag }}
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
         run: |
-          TAG="v$NEW_VERSION"
-
           echo "Creating GitHub Release $TAG..."
 
+          mapfile -t ZIP_FILES < <(
+            find release_files \
+              -type f \
+              -iname "*.zip"
+          )
+
           gh release create "$TAG" \
-            release_files/**/*.zip \
-            --title "GeoTables $TAG" \
-            --notes "$RELEASE_NOTES"
+            "${ZIP_FILES[@]}" \
+            --title "V$NEW_VERSION" \
+            --notes-file release_notes.md
 
           echo ""
-          echo "========================================"
-          echo "Release $TAG created successfully!"
-          echo "========================================"
+          echo "=========================================="
+          echo "        RELEASE CREATED SUCCESSFULLY"
+          echo "=========================================="
+          echo "Version: $NEW_VERSION"
+          echo "Tag:     $TAG"
+          echo ""
+          echo "Assets:"
+          for FILE in "${ZIP_FILES[@]}"; do
+            echo "  $FILE"
+          done
+          echo "=========================================="
