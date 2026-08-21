@@ -5,12 +5,12 @@ import re
 from pathlib import Path
 from pypdf import PdfReader, PdfWriter, Transformation
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
+    QApplication, QMainWindow, QScrollArea, QTextBrowser, QWidget,
     QVBoxLayout, QTableWidget, QTableWidgetItem,
     QMessageBox, QHeaderView, QColorDialog, QStyledItemDelegate,
     QStyleOptionViewItem, QStyle, QInputDialog, QCompleter, QComboBox,
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QAbstractItemView,
-    QFileDialog
+    QFileDialog, QGridLayout, QPushButton
 )
 from PySide6.QtCore import QStringListModel
 from PySide6.QtGui import (
@@ -400,6 +400,43 @@ class EnterKeyDelegate(QStyledItemDelegate):
 
         return "".join(runs)
 
+class CollapsibleSection(QWidget):
+    def __init__(self, title, content, parent=None):
+        super().__init__(parent)
+
+        self.toggle_button = QPushButton(title)
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(False)
+
+        self.content = QTextBrowser()
+        self.content.setHtml(content)
+        self.content.setOpenExternalLinks(True)
+        self.content.setVisible(False)
+        self.content.setMaximumHeight(0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        layout.addWidget(self.toggle_button)
+        layout.addWidget(self.content)
+
+        self.toggle_button.clicked.connect(self.toggle)
+
+    def toggle(self, checked):
+        self.content.setVisible(checked)
+
+        if checked:
+            self.toggle_button.setText(
+                "▼ " + self.toggle_button.text().lstrip("▶▼ ")
+            )
+            self.content.setMaximumHeight(16777215)
+        else:
+            self.toggle_button.setText(
+                "▶ " + self.toggle_button.text().lstrip("▶▼ ")
+            )
+            self.content.setMaximumHeight(0)
+
 class GeoTables(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -418,7 +455,6 @@ class GeoTables(QMainWindow):
         file_menu.addAction("Combine PDFs...", self.combine_pdfs)
         file_menu.addAction("Add JSON Entry", self.add_json_entry)
         file_menu.addAction("Replace special chars", self.replace_special_chars)
-        file_menu.addAction("Add character replacement...", self.add_character_replacement)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
 
@@ -430,6 +466,7 @@ class GeoTables(QMainWindow):
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("About", self.about)
+        help_menu.addAction("Tutorials", self.show_tutorials)
 
         # Config menu in the menubar (top-level)
         config_menu = menubar.addMenu("Config")
@@ -443,6 +480,12 @@ class GeoTables(QMainWindow):
         config_menu.addSeparator()
         config_menu.addAction("Export Config...", self.export_config)
         config_menu.addAction("Import Config...", self.import_config)
+        config_menu.addSeparator()
+        char_menu = config_menu.addMenu("Character Replacements")
+        char_menu.addAction("Add Replacement", self.add_character_replacement)
+        tutorials_action = help_menu.addAction("Tutorials")
+        tutorials_action.triggered.connect(self.show_tutorials)
+
 
         # State
         self.step = 1
@@ -926,59 +969,504 @@ class GeoTables(QMainWindow):
     def about(self):
         print("About GeoTables")
 
+    def show_tutorials(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("GeoTables Tutorials")
+        dialog.resize(850, 700)
+
+        main_layout = QVBoxLayout(dialog)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+
+        container = QWidget()
+        sections_layout = QVBoxLayout(container)
+        sections_layout.setAlignment(Qt.AlignTop)
+
+        tutorials = [
+            (
+                "1. Getting Started",
+                """
+                <h2>Creating a new table</h2>
+
+                <p>When you open GeoTables, you can begin entering your
+                geometry work directly into the table.</p>
+
+                <p>Each row represents a step in your solution. A typical
+                row contains:</p>
+
+                <ul>
+                    <li>A statement</li>
+                    <li>A justification</li>
+                    <li>Any additional information required by the table</li>
+                </ul>
+
+                <p>Work through the table from top to bottom, adding each
+                step of your proof in order.</p>
+
+                <h2>Editing a cell</h2>
+
+                <p>Click a cell to edit its contents.</p>
+
+                <p>You can type mathematical expressions, geometry statements,
+                and other text directly into the cells.</p>
+
+                <p>Press <b>Enter</b> to finish editing the cell.</p>
+                """
+            ),
+
+            (
+                "2. Writing Mathematical Symbols",
+                """
+                <p>GeoTables supports convenient text shortcuts for many
+                mathematical symbols.</p>
+
+                <p>Instead of searching for a symbol manually, type its
+                shortcut and GeoTables can replace it with the corresponding
+                symbol.</p>
+
+                <table border="1" cellpadding="6">
+                    <tr>
+                        <th>Type</th>
+                        <th>Symbol</th>
+                    </tr>
+                    <tr>
+                        <td><code>!=</code></td>
+                        <td>≠</td>
+                    </tr>
+                    <tr>
+                        <td><code>&lt;=</code></td>
+                        <td>≤</td>
+                    </tr>
+                    <tr>
+                        <td><code>&gt;=</code></td>
+                        <td>≥</td>
+                    </tr>
+                    <tr>
+                        <td><code>prl'</code></td>
+                        <td>∥</td>
+                    </tr>
+                    <tr>
+                        <td><code>ngl'</code></td>
+                        <td>∠</td>
+                    </tr>
+                    <tr>
+                        <td><code>tr'</code></td>
+                        <td>△</td>
+                    </tr>
+                    <tr>
+                        <td><code>cng'</code></td>
+                        <td>≌</td>
+                    </tr>
+                    <tr>
+                        <td><code>~</code></td>
+                        <td>∼</td>
+                    </tr>
+                </table>
+
+                <p>This lets you type mathematical notation quickly using
+                an ordinary keyboard.</p>
+                """
+            ),
+
+            (
+                "3. Using Justifications",
+                """
+                <p>Justifications explain <b>why</b> a statement in your
+                proof is true.</p>
+
+                <p>When entering a justification, GeoTables can provide
+                suggestions based on what you type.</p>
+
+                <p>Start typing the name of a justification, and matching
+                suggestions will appear.</p>
+
+                <p>Select the appropriate justification from the suggestions.</p>
+
+                <p>Some justifications may also contain templates that help
+                you construct the statement correctly.</p>
+                """
+            ),
+
+            (
+                "4. Using Templates",
+                """
+                <p>Some justifications have predefined templates.</p>
+
+                <p>Templates contain placeholders for information that changes
+                from one proof to another.</p>
+
+                <p>For example:</p>
+
+                <p><code>{A} = {B}</code></p>
+
+                <p>When using the template, replace the placeholders with the
+                appropriate values.</p>
+
+                <p>Templates are useful when the same type of reasoning appears
+                repeatedly in different problems.</p>
+                """
+            ),
+
+            (
+                "5. Geometry Symbols",
+                """
+                <p>GeoTables can recognize certain categories of geometry
+                justifications and associate them with appropriate shape
+                symbols.</p>
+
+                <ul>
+                    <li>Triangle-related justifications can use △</li>
+                    <li>Quadrilateral-related justifications can use ◻</li>
+                </ul>
+
+                <p>This can make geometry proofs easier to read and visually
+                organize.</p>
+                """
+            ),
+
+            (
+                "6. Creating Your Own Character Replacement",
+                """
+                <p>You can add your own text-to-symbol shortcuts.</p>
+
+                <p>Open the character replacement editor from the appropriate
+                menu option.</p>
+
+                <p>You will see two columns:</p>
+
+                <p><b>Find</b> → <b>Replace</b></p>
+
+                <p>For example:</p>
+
+                <p><code>abc</code> → ★</p>
+
+                <p>After saving, typing <code>abc</code> where character
+                replacement is performed will produce ★.</p>
+
+                <h3>Adding a new row</h3>
+
+                <p>Click <b>Add row</b> to create another replacement pair.</p>
+
+                <p>Enter the text you want GeoTables to find on the left
+                and the replacement text on the right.</p>
+
+                <p>Rows with an empty field are ignored when you save.</p>
+
+                <h3>Saving your replacements</h3>
+
+                <p>Click <b>OK</b> to save the changes.</p>
+
+                <p>Your character replacements are stored in GeoTables'
+                configuration, so they are available the next time you
+                start the program.</p>
+
+                <p>Click <b>Cancel</b> if you want to close the editor
+                without saving your changes.</p>
+                """
+            ),
+
+            (
+                "7. Editing Existing Character Replacements",
+                """
+                <p>Open the character replacement editor to see your current
+                replacement pairs.</p>
+
+                <p>You can change either side of an existing pair.</p>
+
+                <p>For example, you could change:</p>
+
+                <p><code>!=</code> → ≠</p>
+
+                <p>to another shortcut and replacement of your choice.</p>
+
+                <p>You can also add additional rows with <b>Add row</b>.</p>
+
+                <p>If you leave either side of a row empty, that row will not
+                be saved.</p>
+                """
+            ),
+
+            (
+                "8. Saving Your Work",
+                """
+                <p>Save your GeoTables document regularly so that your work
+                is not lost.</p>
+
+                <p>Remember that there are two different kinds of saved
+                information:</p>
+
+                <p><b>Your document</b><br>
+                Contains your actual geometry table and proof.</p>
+
+                <p><b>Your settings</b><br>
+                Contains things such as your character replacement pairs.</p>
+
+                <p>Changing a setting does not necessarily change the currently
+                open document, and editing a document does not necessarily
+                change your settings.</p>
+                """
+            ),
+
+            (
+                "9. A Typical Workflow",
+                """
+                <ol>
+                    <li>Open or create a table.</li>
+                    <li>Enter the first statement of your proof.</li>
+                    <li>Enter its justification.</li>
+                    <li>Continue adding statements and justifications.</li>
+                    <li>Use keyboard shortcuts for mathematical symbols.</li>
+                    <li>Use justification suggestions and templates when helpful.</li>
+                    <li>Review the completed proof.</li>
+                    <li>Save your document.</li>
+                </ol>
+                """
+            ),
+
+            (
+                "10. Tips",
+                """
+                <h3>Use shortcuts</h3>
+                <p>Typing <code>!=</code> is usually faster than searching
+                for ≠.</p>
+
+                <h3>Keep statements concise</h3>
+                <p>A proof is easier to follow when each row contains one
+                clear step.</p>
+
+                <h3>Use the justification suggestions</h3>
+                <p>They can save time and help keep your terminology
+                consistent.</p>
+
+                <h3>Customize your shortcuts</h3>
+                <p>If you frequently use a symbol or notation that does not
+                have a convenient shortcut, add your own character replacement.</p>
+
+                <h3>Save regularly</h3>
+                <p>Especially when working on a long proof. Future-you will
+                appreciate present-you's foresight. 🧮</p>
+                """
+            ),
+        ]
+
+        for title, content in tutorials:
+            section = CollapsibleSection(title, content)
+            sections_layout.addWidget(section)
+
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll)
+
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        main_layout.addWidget(close_button)
+
+        dialog.exec()
+
     def add_json_entry(self):
-        # Collect fields via simple input dialogs.
-        id_text, ok = QInputDialog.getText(self, "Add JSON Entry", "id:")
-        if not ok or not id_text.strip():
-            return
-        id_text = id_text.strip()
-
-        names_text, ok = QInputDialog.getText(self, "Add JSON Entry", "names (semicolon (;) -separated):")
-        if not ok:
-            return
-        names = [n.strip() for n in names_text.split(";") if n.strip()] if names_text.strip() else []
-
-        categories_text, ok = QInputDialog.getText(self, "Add JSON Entry", "categories (semicolon (;) -separated):")
-        if not ok or not categories_text.strip():
-            QMessageBox.warning(self, "Error", "At least one category is required.")
-            return
-        categories = [c.strip() for c in categories_text.split(";") if c.strip()]
-
-        templates_text, ok = QInputDialog.getText(self, "Add JSON Entry", "templates (comma-separated):")
-        if not ok:
-            return
-        templates = [t.strip() for t in templates_text.split(",") if t.strip()] if templates_text.strip() else []
-
-        variables_text, ok = QInputDialog.getText(self, "Add JSON Entry", "variables (comma-separated):")
-        if not ok:
-            return
-        variables = [v.strip() for v in variables_text.split(",") if v.strip()] if variables_text.strip() else []
-
+        # Load existing JSON first, since categories come from it.
         path = self._app_dir / "justifications.json"
-
         items = []
+
         if path.exists():
             try:
                 with path.open("r", encoding="utf-8") as f:
                     items = json.load(f)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to read JSON: {e}")
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to read JSON: {e}"
+                )
                 return
 
         if not isinstance(items, list):
-            QMessageBox.critical(self, "Error", "JSON root must be a list.")
+            QMessageBox.critical(
+                self,
+                "Error",
+                "JSON root must be a list."
+            )
             return
 
-        action = "added"
+        # Ask for the ID.
+        id_text, ok = QInputDialog.getText(
+            self,
+            "Add JSON Entry",
+            "id:"
+        )
+
+        if not ok or not id_text.strip():
+            return
+
+        id_text = id_text.strip()
+
+        # Generic repeated-input helper.
+        # Keeps asking until the user enters a blank value.
+        def get_list(prompt):
+            values = []
+
+            while True:
+                value, ok = QInputDialog.getText(
+                    self,
+                    "Add JSON Entry",
+                    f"{prompt}\n\nLeave blank when finished."
+                )
+
+                if not ok:
+                    return None
+
+                value = value.strip()
+
+                if not value:
+                    break
+
+                values.append(value)
+
+            return values
+
+        # Names
+        names = get_list("Enter a name:")
+
+        if names is None:
+            return
+
+        # Collect all existing categories.
+        existing_categories = set()
+
         for item in items:
-            if item.get("id") == id_text:
+            if not isinstance(item, dict):
+                continue
+
+            item_categories = item.get("categories", [])
+
+            # Support old JSON entries that may still use "category".
+            if not item_categories:
+                old_category = item.get("category")
+
+                if old_category:
+                    item_categories = [old_category]
+
+            if isinstance(item_categories, list):
+                for category in item_categories:
+                    if isinstance(category, str) and category.strip():
+                        existing_categories.add(category.strip())
+
+        existing_categories = sorted(
+            existing_categories,
+            key=str.lower
+        )
+
+        # Categories
+        categories = []
+
+        while True:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Add JSON Entry")
+
+            layout = QVBoxLayout(dialog)
+
+            label = QLabel("Select a category:")
+            layout.addWidget(label)
+
+            combo = QComboBox()
+            combo.addItems(existing_categories)
+            combo.addItem("Other...")
+            layout.addWidget(combo)
+
+            other_field = QLineEdit()
+            other_field.setPlaceholderText("Enter new category")
+            other_field.setVisible(False)
+            layout.addWidget(other_field)
+
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+            )
+            layout.addWidget(buttons)
+
+            def category_changed():
+                is_other = combo.currentText() == "Other..."
+                other_field.setVisible(is_other)
+
+                if is_other:
+                    other_field.setFocus()
+
+            combo.currentTextChanged.connect(category_changed)
+
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+
+            # If there are no existing categories,
+            # automatically select Other...
+            if not existing_categories:
+                combo.setCurrentText("Other...")
+                other_field.setVisible(True)
+
+            if dialog.exec() != QDialog.Accepted:
+                return
+
+            if combo.currentText() == "Other...":
+                category = other_field.text().strip()
+
+                if not category:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid category",
+                        "Please enter a category."
+                    )
+                    continue
+            else:
+                category = combo.currentText().strip()
+
+            # Don't add duplicate categories.
+            if category and category not in categories:
+                categories.append(category)
+
+            # Ask whether another category should be added.
+            more = QMessageBox.question(
+                self,
+                "Add another category?",
+                "Would you like to add another category?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if more == QMessageBox.No:
+                break
+
+        if not categories:
+            QMessageBox.warning(
+                self,
+                "Error",
+                "At least one category is required."
+            )
+            return
+
+        # Templates
+        templates = get_list("Enter a template:")
+
+        if templates is None:
+            return
+
+        # Variables
+        variables = get_list("Enter a variable:")
+
+        if variables is None:
+            return
+
+        # Add or update the entry.
+        action = "added"
+
+        for item in items:
+            if isinstance(item, dict) and item.get("id") == id_text:
                 item["name"] = names
                 item["categories"] = categories
                 item.pop("category", None)
                 item["templates"] = templates
                 item["variables"] = variables
+
                 action = "updated"
                 break
+
         else:
             items.append({
                 "id": id_text,
@@ -988,15 +1476,129 @@ class GeoTables(QMainWindow):
                 "variables": variables,
             })
 
+        # Save JSON.
         try:
             with path.open("w", encoding="utf-8") as f:
-                json.dump(items, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    items,
+                    f,
+                    ensure_ascii=False,
+                    indent=2
+                )
                 f.write("\n")
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to write JSON: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to write JSON: {e}"
+            )
             return
 
-        QMessageBox.information(self, "Success", f"{action}: {id_text}")
+        QMessageBox.information(
+            self,
+            "Success",
+            f"{action}: {id_text}"
+        )
+
+
+    def get_categories(self, items):
+        # Collect all existing categories
+        existing_categories = set()
+
+        for item in items:
+            categories = item.get("categories", [])
+
+            # Support old entries that may still use "category"
+            if not categories:
+                old_category = item.get("category")
+                if old_category:
+                    categories = [old_category]
+
+            if isinstance(categories, list):
+                for category in categories:
+                    if isinstance(category, str) and category.strip():
+                        existing_categories.add(category.strip())
+
+        existing_categories = sorted(existing_categories, key=str.lower)
+
+        categories = []
+
+        while True:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Add JSON Entry")
+
+            layout = QVBoxLayout(dialog)
+
+            label = QLabel(
+                "Select a category:\n"
+                "Choose an existing category or select Other..."
+            )
+            layout.addWidget(label)
+
+            combo = QComboBox()
+            combo.addItems(existing_categories)
+            combo.addItem("Other...")
+            layout.addWidget(combo)
+
+            other_field = QLineEdit()
+            other_field.setPlaceholderText("Enter new category")
+            other_field.setVisible(False)
+            layout.addWidget(other_field)
+
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+            )
+            layout.addWidget(buttons)
+
+            def category_changed(index):
+                is_other = combo.currentText() == "Other..."
+                other_field.setVisible(is_other)
+
+                if is_other:
+                    other_field.setFocus()
+
+            combo.currentIndexChanged.connect(category_changed)
+
+            buttons.accepted.connect(dialog.accept)
+            buttons.rejected.connect(dialog.reject)
+
+            # If there are no existing categories, automatically use Other
+            if not existing_categories:
+                combo.setCurrentText("Other...")
+
+            if dialog.exec() != QDialog.Accepted:
+                return None
+
+            if combo.currentText() == "Other...":
+                category = other_field.text().strip()
+
+                if not category:
+                    QMessageBox.warning(
+                        self,
+                        "Invalid category",
+                        "Please enter a category."
+                    )
+                    continue
+            else:
+                category = combo.currentText().strip()
+
+            if category and category not in categories:
+                categories.append(category)
+
+            # Ask for another category
+            more = QMessageBox.question(
+                self,
+                "Add another category?",
+                "Would you like to add another category?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if more == QMessageBox.No:
+                break
+
+        return categories
 
     def set_sequence_format(self):
         before, ok = QInputDialog.getText(self, "Sequence format", "Text before sequence:", text=self.seq_before)
@@ -1049,6 +1651,7 @@ class GeoTables(QMainWindow):
                 "or one of the fields was empty."
             )
             return
+        
 
         self.table.viewport().update()
         QMessageBox.information(
@@ -1056,6 +1659,85 @@ class GeoTables(QMainWindow):
             "Character replacement added",
             f'"{find_text}" -> "{replace_text}" added and saved to config.json.'
         )
+
+    def edit_charecter_replacements(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("edit find/replace character pairs")
+        layout = QGridLayout(dialog)
+
+        layout.addWidget(QLabel("find_chars"), 0, 0)
+        layout.addWidget(QLabel("replace_chars"), 0,2)
+
+        find_fields = []
+        replace_fields = []
+
+        for row, (find,replace) in enumerate(zip(
+            self.backend.find_chars,self.backend.replace_chars
+            ),start = 1):
+            find_field = QLineEdit(find)
+            arrow = QLabel("→")
+            replace_field = QLineEdit(replace)
+            layout.addWidget(find_field, row, 0)
+            layout.addWidget(arrow, row, 1)
+            layout.addWidget(replace_field, row, 2)
+            find_fields.append(find_field)
+            replace_fields.append(replace_field)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            parent=dialog
+        )
+        def add_row():
+            row = len(find_fields) + 1
+
+            find_field = QLineEdit()
+            arrow = QLabel("→")
+            replace_field = QLineEdit()
+
+            layout.addWidget(find_field, row, 0)
+            layout.addWidget(arrow, row, 1)
+            layout.addWidget(replace_field, row, 2)
+
+            find_fields.append(find_field)
+            replace_fields.append(replace_field)
+
+            layout.removeWidget(add_row_button)
+            layout.removeWidget(buttons)
+
+            layout.addWidget(add_row_button, row + 1, 0, 1, 3)
+            layout.addWidget(buttons, row + 2, 0, 1, 3)
+
+
+        add_row_button = QPushButton("Add row")
+        add_row_button.clicked.connect(add_row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            parent=dialog
+        )
+
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout.addWidget(add_row_button, len(find_fields) + 1, 0, 1, 3)
+        layout.addWidget(buttons, len(find_fields) + 2, 0, 1, 3)
+
+
+        result = dialog.exec()
+        if result == QDialog.Accepted:
+            pairs = [
+                (find_field.text().strip(), replace_field.text().strip())
+                for find_field, replace_field in zip(find_fields, replace_fields)
+                if find_field.text().strip() and replace_field.text().strip()
+            ]
+
+            self.backend.find_chars = [find for find, replace in pairs]
+            self.backend.replace_chars = [replace for find, replace in pairs]
+
+
+            self.backend.save_chars_config()
+                
+
+
 
     def on_item_changed(self, item):
         if self._ignore_item_changed:
