@@ -13,7 +13,7 @@ on:
           - major
 
       release_notes:
-        description: "Release notes"
+        description: 'Release notes. Use \n for new lines.'
         required: true
         type: string
 
@@ -26,7 +26,7 @@ jobs:
 
     steps:
       # --------------------------------------------------
-      # Get the repository
+      # Get repository
       # --------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,24 +69,7 @@ jobs:
             app.py
 
       # --------------------------------------------------
-      # Create ZIP
-      # --------------------------------------------------
-      - name: Create release ZIP
-        shell: powershell
-        run: |
-          $version = "build"
-
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-
-          Copy-Item "dist\GeoTables.exe" "release\GeoTables.exe"
-
-          Compress-Archive `
-            -Path "release\GeoTables.exe" `
-            -DestinationPath "GeoTables-$version.zip" `
-            -Force
-
-      # --------------------------------------------------
-      # Get latest version tag
+      # Calculate new version
       # --------------------------------------------------
       - name: Calculate new version
         id: version
@@ -138,14 +121,34 @@ jobs:
           echo "tag=$new_tag" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------
-      # Rename ZIP with actual version
+      # Create release ZIP
       # --------------------------------------------------
-      - name: Rename release ZIP
+      - name: Create release ZIP
         shell: powershell
         run: |
-          Rename-Item `
-            "GeoTables-build.zip" `
-            "GeoTables-${{ steps.version.outputs.version }}.zip"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+
+          Copy-Item `
+            "dist\GeoTables.exe" `
+            "release\GeoTables.exe"
+
+          Compress-Archive `
+            -Path "release\GeoTables.exe" `
+            -DestinationPath "GeoTables-${{ steps.version.outputs.version }}.zip" `
+            -Force
+
+      # --------------------------------------------------
+      # Convert \n in release notes into real newlines
+      # --------------------------------------------------
+      - name: Create release notes file
+        shell: bash
+        env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          printf '%b' "$RELEASE_NOTES" > release_notes.md
+
+          echo "Release notes:"
+          cat release_notes.md
 
       # --------------------------------------------------
       # Create Git tag
@@ -171,4 +174,4 @@ jobs:
             "${{ steps.version.outputs.tag }}" \
             "GeoTables-${{ steps.version.outputs.version }}.zip" \
             --title "GeoTables ${{ steps.version.outputs.version }}" \
-            --notes "${{ inputs.release_notes }}"
+            --notes-file release_notes.md
